@@ -1,8 +1,8 @@
 /*
  * keys.c
  *
- *  키 매트릭스 스캐너 - EPWM1 4채널 accumulator + 순환 PDMA.
- *  [실험] COL 능동 방전(open-drain) 버전. 문제 있으면 커밋 d09125d 로 되돌릴 것.
+ *  키 매트릭스 스캐너 - EPWM1 4채널 accumulator + 순환 PDMA + COL 능동 방전(open-drain).
+ *  방전/풀다운은 KEY_USE_DISCHARGE / KEY_USE_PULLDOWN 로 토글. 실측 1MHz 동작.
  *
  *  회로도: ROW0~3 = PA.0~3, COL0~8 = PB.15~PB.7, COL9~11 = PB.2/PB.1/PB.0.
  *          LL4148 다이오드 anode->ROW.
@@ -48,11 +48,13 @@
 #define KEY_PDMA_CH_REL     3                   /* EPWM1 CH2 @25%   : COL 릴리즈 */
 #define KEY_PDMA_CH_READ    4                   /* EPWM1 CH3 @75%   : COL 읽기 */
 
-#define KEY_SCAN_FREQ_HZ    500000
+#define KEY_SCAN_FREQ_HZ    1000000
 #define KEY_DISCHARGE_DUTY  5                   /* COL 방전 시점 % (ROW@0% 와 분리 마진) */
 #define KEY_RELEASE_DUTY    25                  /* COL 릴리즈 시점 % */
 #define KEY_SAMPLE_DUTY     75                  /* COL 샘플 시점 % */
 #define KEY_ACC_CNT         0                   /* 0 = 매 주기(1×). 1 은 2× */
+#define KEY_USE_DISCHARGE   1                   /* 1=능동방전, 0=방전끔(파형 비교용) */
+#define KEY_USE_PULLDOWN    1                   /* 1=COL 내부 풀다운 병행(보험), 0=끔 */
 
 
 typedef struct
@@ -86,7 +88,7 @@ static uint16_t matrix[MATRIX_ROWS];
 
 static volatile uint32_t row_pat[MATRIX_ROWS];              /* 행 선택 패턴 -> PA->DOUT */
 static volatile uint32_t col_raw[MATRIX_ROWS];              /* PB->PIN 캡처 (행별) */
-static volatile uint32_t col_dis_val = 0;                   /* COL 방전값(=0) */
+static volatile uint32_t col_dis_val = KEY_USE_DISCHARGE ? 0 : KEY_COL_MASK; /* 방전=0, 끄면 릴리즈값(무효) */
 static volatile uint32_t col_rel_val = KEY_COL_MASK;        /* COL 릴리즈값(col 비트 1) */
 
 static __attribute__((aligned(4))) dma_desc_t desc_row;
@@ -150,6 +152,9 @@ bool keysInit(void)
   /* COL : open-drain 출력, 유휴 릴리즈(1), 비COL 비트 보호 */
   GPIO_SetMode(KEY_COL_PORT, KEY_COL_MASK, GPIO_MODE_OPEN_DRAIN);
   KEY_COL_PORT->DOUT |= KEY_COL_MASK;
+#if KEY_USE_PULLDOWN
+  GPIO_SetPullCtl(KEY_COL_PORT, KEY_COL_MASK, GPIO_PUSEL_PULL_DOWN);   /* 릴리즈 시 LOW 유지(보험) */
+#endif
   GPIO_ENABLE_DOUT_MASK(KEY_COL_PORT, KEY_COL_PROT_MASK);
 
   /* ---- EPWM1 : 4채널 동일 주기, CH2=25% / CH3=75% compare ---- */
