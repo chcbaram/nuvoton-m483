@@ -92,27 +92,54 @@ bool eepromReadByte(uint32_t addr, uint8_t *p_data)
   return ret;
 }
 
+/* write-cycle 완료/idle 여부 (단일 ACK 프로브, 블로킹 없음) */
+bool eepromIsReady(void)
+{
+  if (is_init == false)
+    return false;
+  return i2cIsDeviceReady(i2c_ch, i2c_addr);
+}
+
+/* 논블로킹: 쓰기만 시작(write cycle 진행), 완료 대기 안 함.
+ * 호출 전 eepromIsReady() 로 직전 write 완료를 확인해야 한다. */
+bool eepromWriteByteNb(uint32_t addr, uint8_t data_in)
+{
+  if (addr >= EEPROM_MAX_SIZE)
+    return false;
+
+  return i2cWriteA16Bytes(i2c_ch, i2c_addr, addr, &data_in, 1, 10);
+}
+
+/* 블로킹(직접 호출용): 직전 write 완료 대기 -> 쓰기 -> 이번 cycle 완료 대기. */
 bool eepromWriteByte(uint32_t addr, uint8_t data_in)
 {
   uint32_t pre_time;
-  bool     ret;
 
   if (addr >= EEPROM_MAX_SIZE)
     return false;
 
-  ret = i2cWriteA16Bytes(i2c_ch, i2c_addr, addr, &data_in, 1, 10);
-
-  /* write cycle 완료까지 ACK polling (최대 100ms) */
+  /* 직전 write(비동기 Nb 포함)가 진행 중이면 완료 대기 */
   pre_time = millis();
-  while (millis() - pre_time < 100)
+  while (eepromIsReady() == false)
   {
-    ret = i2cIsDeviceReady(i2c_ch, i2c_addr);
-    if (ret == true)
-      break;
+    if (millis() - pre_time >= 100)
+      return false;
     delay(1);
   }
 
-  return ret;
+  if (eepromWriteByteNb(addr, data_in) == false)
+    return false;
+
+  /* 이번 write cycle 완료까지 ACK polling (최대 100ms) */
+  pre_time = millis();
+  while (millis() - pre_time < 100)
+  {
+    if (eepromIsReady() == true)
+      return true;
+    delay(1);
+  }
+
+  return false;
 }
 
 bool eepromRead(uint32_t addr, uint8_t *p_data, uint32_t length)

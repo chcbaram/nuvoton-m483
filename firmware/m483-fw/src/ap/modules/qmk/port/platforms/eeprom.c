@@ -24,23 +24,36 @@ void eeprom_init(void)
   qbufferCreateBySize(&write_q, (uint8_t *)write_buf, sizeof(eeprom_write_t), EEPROM_WRITE_Q_BUF_MAX); 
 }
 
+/*
+ * 논블로킹 드레인 : 큐에 쓸 바이트가 있고 EEPROM 이 준비(직전 write cycle 완료)됐을 때만
+ * 한 바이트 쓰기를 "시작"하고 즉시 반환한다. write cycle(~5ms) 동안은 준비 프로브(~30us)만
+ * 하고 넘어가므로 슈퍼루프(매트릭스 스캔 -> USB)가 블로킹되지 않는다.
+ * (기존엔 eepromWriteByte 가 바이트당 delay(1) 로 ~5ms 블록 -> 부팅/VIA저장 시 입력 끊김)
+ */
 void eeprom_update(void)
 {
   eeprom_write_t write_byte;
 
-  if (qbufferAvailable(&write_q) > 0)
+  if (qbufferAvailable(&write_q) > 0 && eepromIsReady())
   {
     qbufferRead(&write_q, (uint8_t *)&write_byte, 1);
-    if (eepromWriteByte(write_byte.addr, write_byte.data))
+    if (eepromWriteByteNb(write_byte.addr, write_byte.data) == false)
     {
-      #if 0
-      logPrintf("eepromWriteByte() OK %d:0x%02X\n", write_byte.addr, write_byte.data);
-      #endif
+      logPrintf("eepromWriteByteNb() Fail\n");
     }
-    else
-    {
-      logPrintf("eepromWriteByte() Fail\n");
-    }
+  }
+}
+
+/* 블로킹: 큐에 남은 바이트를 전부 동기 기록한다. 리셋/DFU 직전 유실 방지용. */
+void eeprom_flush(void)
+{
+  eeprom_write_t write_byte;
+
+  while (qbufferAvailable(&write_q) > 0)
+  {
+    qbufferRead(&write_q, (uint8_t *)&write_byte, 1);
+    if (eepromWriteByte(write_byte.addr, write_byte.data) == false)
+      logPrintf("eeprom_flush() Fail\n");
   }
 }
 

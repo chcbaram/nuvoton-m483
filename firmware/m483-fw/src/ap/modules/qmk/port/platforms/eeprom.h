@@ -8,7 +8,8 @@
 
 
 void     eeprom_init(void);
-void     eeprom_update(void);
+void     eeprom_update(void);   /* 논블로킹 1바이트 드레인 (준비됐을 때만) */
+void     eeprom_flush(void);    /* 블로킹: 큐 전체 동기 기록 (리셋/DFU 직전) */
 void     eeprom_task(void);
 void     eeprom_req_clean(void);
 uint8_t  eeprom_read_byte(const uint8_t *addr);
