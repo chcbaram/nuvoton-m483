@@ -731,34 +731,46 @@ void keyboard_task(void) {
 #    endif
 #endif
 
+    /* [M483 8K 로컬 패치] 비입력 housekeeping(mousekey/led/os_detection 등)을
+     * 매 스캔이 아니라 ~1ms 간격으로만 호출 -> 슈퍼루프 주기 단축(입력 관측지연↓).
+     * 매트릭스 스캔/action(matrix_task, 위)은 매 스캔 그대로 돌아 저지연 유지. */
+    {
+        static uint32_t hk_last_ms = 0;
+        uint32_t        hk_now_ms  = timer_read32();
+
+        if (hk_now_ms != hk_last_ms) {
+            hk_last_ms = hk_now_ms;
+
 #ifdef MOUSEKEY_ENABLE
-    // mousekey repeat & acceleration
-    mousekey_task();
+            // mousekey repeat & acceleration
+            mousekey_task();
 #endif
 
 #ifdef PS2_MOUSE_ENABLE
-    ps2_mouse_task();
+            ps2_mouse_task();
 #endif
 
 #ifdef MIDI_ENABLE
-    midi_task();
+            midi_task();
 #endif
 
 #ifdef JOYSTICK_ENABLE
-    joystick_task();
+            joystick_task();
 #endif
 
 #ifdef BLUETOOTH_ENABLE
-    bluetooth_task();
+            bluetooth_task();
 #endif
 
 #ifdef HAPTIC_ENABLE
-    haptic_task();
+            haptic_task();
 #endif
 
-    led_task();
+            led_task();
 
 #ifdef OS_DETECTION_ENABLE
-    os_detection_task();
+            os_detection_task();
 #endif
+        }
+    }
 }

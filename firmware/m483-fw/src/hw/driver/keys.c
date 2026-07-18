@@ -65,6 +65,7 @@ static void cliKeys(cli_args_t *args);
 /* ---- 보드별 런타임 설정 (keysInit(cfg) 에서 채움) ---- */
 static uint8_t  col_bit[KEY_COL_MAX];      /* COL 이 매핑된 PB 비트번호 */
 static uint8_t  row_bit[KEY_ROW_MAX];      /* ROW 가 매핑된 PA 비트번호 */
+static uint8_t  col_of_pin[16];            /* 역맵 : PB 비트번호 -> COL 인덱스 (keysUpdate CTZ 용) */
 static uint8_t  key_row_cnt = 0;
 static uint8_t  key_col_cnt = 0;
 
@@ -139,10 +140,13 @@ bool keysInit(const keys_cfg_t *cfg)
     matrix[i]     = 0;
     col_raw[i]    = 0;
   }
+  for (int i = 0; i < 16; i++)
+    col_of_pin[i] = 0;
   for (int i = 0; i < key_col_cnt; i++)
   {
-    col_bit[i]    = cfg->col_bits[i];
-    key_col_mask |= (1UL << col_bit[i]);
+    col_bit[i]              = cfg->col_bits[i];
+    key_col_mask           |= (1UL << col_bit[i]);
+    col_of_pin[col_bit[i]]  = (uint8_t)i;    /* 역맵 : PB 비트 -> COL 인덱스 */
   }
   key_row_prot = (~key_row_mask) & 0xFFFF;   /* DATMSK: ROW 외 비트 보호 */
   key_col_prot = (~key_col_mask) & 0xFFFF;   /* DATMSK: COL 외 비트 보호 */
@@ -228,13 +232,16 @@ bool keysUpdate(void)
 
   for (int r = 0; r < key_row_cnt; r++)
   {
-    uint32_t pb = col_raw[r];
+    uint32_t pb   = col_raw[r] & key_col_mask;   /* COL 핀 비트만 */
     uint16_t cols = 0;
 
-    for (int c = 0; c < key_col_cnt; c++)
+    /* 눌린(set) 칼럼 핀만 CTZ 순회 -> 역맵으로 COL 인덱스 배치.
+     * (전 12칼럼 순회 대신 눌린 개수만큼만 = idle 시 0회) */
+    while (pb)
     {
-      if (pb & (1UL << col_bit[c]))          /* 눌림 -> 해당 COL HIGH */
-        cols |= (1UL << c);
+      uint8_t pin = (uint8_t)__builtin_ctz(pb);
+      cols |= (uint16_t)(1U << col_of_pin[pin]);
+      pb   &= pb - 1;
     }
     matrix[r] = cols;
   }
