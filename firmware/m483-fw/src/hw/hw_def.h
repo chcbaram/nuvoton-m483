@@ -30,10 +30,19 @@
 #define      HW_CLI_LINE_HIS_MAX    8
 #define      HW_CLI_LINE_BUF_MAX    64
 
+#define _USE_HW_BUTTON
+#define      HW_BUTTON_MAX_CH       1
+
+#define _USE_HW_RESET
+
+#define _USE_HW_USB
+#define      HW_USB_HID             1
+
 
 //-- USE CLI
 //
 #define _USE_CLI_HW_LED             1
+#define _USE_CLI_HW_RESET           1
 
 
 #endif

@@ -49,6 +49,34 @@ uint32_t millis(void)
   return systick_ms;
 }
 
+/*
+ * 1kHz SysTick 기반 마이크로초 카운터.
+ * systick_ms(1ms 단위) + 현재 SysTick 카운터 잔여로 us 를 구성한다.
+ * SysTick 언더플로가 아직 서비스되지 않은 경우(PENDSTSET) ms 를 보정해
+ * ISR/thread 어디서 호출해도 단조 증가하도록 한다.
+ */
+uint32_t micros(void)
+{
+  uint32_t ms;
+  uint32_t val;
+  uint32_t load = SysTick->LOAD + 1U;
+  uint32_t ticks_per_us = SystemCoreClock / 1000000U;
+  uint32_t pri = __get_PRIMASK();
+
+  __disable_irq();
+  ms  = systick_ms;
+  val = SysTick->VAL;
+  if (SCB->ICSR & SCB_ICSR_PENDSTSET_Msk)   /* SysTick 언더플로 미처리 -> ms +1 */
+  {
+    ms++;
+    val = SysTick->VAL;
+  }
+  if (!pri)
+    __enable_irq();
+
+  return (ms * 1000U) + ((load - val) / ticks_per_us);
+}
+
 
 bool bspInitClock(void)
 {

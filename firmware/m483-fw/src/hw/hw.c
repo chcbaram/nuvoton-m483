@@ -28,9 +28,13 @@ bool hwInit(void)
   logOpen(HW_LOG_CH, 115200);
   logPrintf("\r\n[ Firmware Begin... ]\r\n");
   logPrintf("Booting..Name \t\t: %s\r\n", _DEF_BOARD_NAME);
-  logPrintf("Booting..Ver  \t\t: %s\r\n", _DEF_FIRMWATRE_VERSION);  
+  logPrintf("Booting..Ver  \t\t: %s\r\n", _DEF_FIRMWATRE_VERSION);
   logPrintf("Booting..Clock\t\t: %d Mhz\r\n", (int)CLK_GetPLLClockFreq()/1000000);
   logPrintf("\n");
+
+  resetInit();
+  buttonInit();
+  usbInit();
 
   return true;
 }

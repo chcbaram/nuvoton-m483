@@ -12,6 +12,9 @@ extern "C" {
 #include "uart.h"
 #include "log.h"
 #include "cli.h"
+#include "button.h"
+#include "reset.h"
+#include "usb.h"
 
 bool hwInit(void);
 

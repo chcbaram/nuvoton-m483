@@ -3,7 +3,7 @@
 #ifdef _USE_HW_UART
 #include "qbuffer.h"
 #include "cli.h"
-#ifdef _USE_HW_USB
+#ifdef _USE_HW_CDC
 #include "cdc.h"
 #endif
 
@@ -212,7 +212,7 @@ uint32_t uartAvailable(uint8_t ch)
       break;
 
     case _DEF_UART2:
-      #ifdef _USE_HW_USB
+      #ifdef _USE_HW_CDC
       ret = cdcAvailable();
       #endif
       break;      
@@ -251,7 +251,7 @@ uint8_t uartRead(uint8_t ch)
       break;
 
     case _DEF_UART2:
-      #ifdef _USE_HW_USB
+      #ifdef _USE_HW_CDC
       ret = cdcRead();
       #endif
       break;      
@@ -289,7 +289,7 @@ uint32_t uartWrite(uint8_t ch, uint8_t *p_data, uint32_t length)
       break;
 
     case _DEF_UART2:
-      #ifdef _USE_HW_USB
+      #ifdef _USE_HW_CDC
       ret = cdcWrite(p_data, length);
       #endif
       break;      
@@ -324,7 +324,7 @@ uint32_t uartGetBaud(uint8_t ch)
 
   if (ch >= UART_MAX_CH) return 0;
 
-  #ifdef _USE_HW_USB
+  #ifdef _USE_HW_CDC
   if (ch == HW_UART_CH_USB)
     ret = cdcGetBaud();
   else
