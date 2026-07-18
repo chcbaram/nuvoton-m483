@@ -18,16 +18,23 @@ if (NOT EXISTS "${QMK_KEYBOARD_PATH}/config.h")
 endif()
 message(STATUS "QMK KEYBOARD_PATH = ${KEYBOARD_PATH}")
 
-# 디바운스 타입: 보드 config.cmake 의 DEBOUNCE_TYPE.
-# 기본 asym_eager_defer_pk = make(누름) 즉시 등록(저지연) + break(뗌) DEBOUNCE ms 안정 확인
-# (hold 중 채터로 인한 연타 방지). 게이밍에 적합.
+# 보드 옵션 (config.cmake): DEBOUNCE_RUNTIME, DEBOUNCE_TYPE 등.
 if (EXISTS "${QMK_KEYBOARD_PATH}/config.cmake")
   include("${QMK_KEYBOARD_PATH}/config.cmake")
 endif()
-if (NOT DEFINED DEBOUNCE_TYPE OR DEBOUNCE_TYPE STREQUAL "")
-  set(DEBOUNCE_TYPE asym_eager_defer_pk)
+
+# 디바운스:
+#  - DEBOUNCE_RUNTIME 켜면 런타임 TYPE/TIME 선택(VIA). stock 단일 디바운스는 컴파일하지 않고
+#    port/debounce_runtime.c 가 debounce* 심볼을 제공하며 eager(GAMING)/defer(TYPING) 를 감싼다.
+#  - 아니면 단일 알고리즘(DEBOUNCE_TYPE, 기본 sym_eager_pk).
+if (DEBOUNCE_RUNTIME)
+  message(STATUS "QMK DEBOUNCE = RUNTIME (GAMING=sym_eager_pk / TYPING=sym_defer_pk, VIA 선택)")
+else()
+  if (NOT DEFINED DEBOUNCE_TYPE OR DEBOUNCE_TYPE STREQUAL "")
+    set(DEBOUNCE_TYPE sym_eager_pk)
+  endif()
+  message(STATUS "QMK DEBOUNCE_TYPE = ${DEBOUNCE_TYPE}")
 endif()
-message(STATUS "QMK DEBOUNCE_TYPE = ${DEBOUNCE_TYPE}")
 
 # ---- 컴파일할 소스 (명시적 allow-list) ----
 set(QMK_SRC_FILES
@@ -45,6 +52,10 @@ set(QMK_SRC_FILES
   ${QMK_ROOT_PATH}/port/platforms/bootloader.c
   ${QMK_ROOT_PATH}/port/platforms/suspend.c
 
+  # VENOM VIA 커스텀 채널 (Phase B): 버전/시스템(DFU/EEPROM 리셋)
+  ${QMK_ROOT_PATH}/port/ver_port.c
+  ${QMK_ROOT_PATH}/port/sys_port.c
+
   # quantum (stock, 최소 집합)
   ${QMK_ROOT_PATH}/quantum/quantum.c
   ${QMK_ROOT_PATH}/quantum/via.c
@@ -61,11 +72,37 @@ set(QMK_SRC_FILES
   ${QMK_ROOT_PATH}/quantum/keymap_introspection.c   # #include KEYMAP_C (keymap.c 직접 컴파일 안함)
   ${QMK_ROOT_PATH}/quantum/color.c
   ${QMK_ROOT_PATH}/quantum/mousekey.c
-  ${QMK_ROOT_PATH}/quantum/debounce/${DEBOUNCE_TYPE}.c
   ${QMK_ROOT_PATH}/quantum/process_keycode/process_key_override.c
   ${QMK_ROOT_PATH}/quantum/process_keycode/process_grave_esc.c
   ${QMK_ROOT_PATH}/quantum/process_keycode/process_magic.c   # NK_TOGG / GU_TOGG(Win락)
 )
+
+# 디바운스 소스 (런타임 vs 단일)
+if (DEBOUNCE_RUNTIME)
+  add_compile_definitions(DEBOUNCE_RUNTIME)
+  list(APPEND QMK_SRC_FILES
+    ${QMK_ROOT_PATH}/port/debounce_runtime.c
+    ${QMK_ROOT_PATH}/port/debounce_eager_pk.c   # sym_eager_pk 래퍼
+    ${QMK_ROOT_PATH}/port/debounce_defer_pk.c   # sym_defer_pk 래퍼
+    ${QMK_ROOT_PATH}/port/debounce_cfg.c        # VIA 채널 + eeconfig
+  )
+else()
+  list(APPEND QMK_SRC_FILES ${QMK_ROOT_PATH}/quantum/debounce/${DEBOUNCE_TYPE}.c)
+endif()
+
+# VENOM 게이밍 기능 (보드 config.cmake opt-in)
+if (KILL_SWITCH_ENABLE)
+  add_compile_definitions(KILL_SWITCH_ENABLE)
+  list(APPEND QMK_SRC_FILES ${QMK_ROOT_PATH}/port/kill_switch.c)
+endif()
+if (KKUK_ENABLE)
+  add_compile_definitions(KKUK_ENABLE)
+  list(APPEND QMK_SRC_FILES ${QMK_ROOT_PATH}/port/kkuk.c)
+endif()
+
+# 보드별 port/*.c (via_port.c 등)
+file(GLOB QMK_BOARD_PORT CONFIGURE_DEPENDS ${QMK_KEYBOARD_PATH}/port/*.c)
+list(APPEND QMK_SRC_FILES ${QMK_BOARD_PORT})
 
 file(GLOB QMK_SRC_GLOB CONFIGURE_DEPENDS
   ${QMK_ROOT_PATH}/quantum/sequencer/*.c

@@ -1,8 +1,17 @@
 cmake_minimum_required(VERSION 3.13)
 
 
-# 디바운스 알고리즘 (quantum/debounce/<name>.c)
-#   sym_eager_pk        : 양쪽 에지 즉시 등록(누름/뗌 모두 최저지연) — 게이밍용.
-#                         단, 채터는 하드웨어 스캔 읽기를 깨끗하게 해서 없애야 한다(디바운스로 못 가림).
-#   asym_eager_defer_pk : 누름 즉시 + 뗌 지연(채터 필터) — 뗌 지연 때문에 게이밍엔 부적합.
-set(DEBOUNCE_TYPE sym_eager_pk)
+# 런타임 디바운스 (VIA 에서 TYPE/TIME 선택, eeconfig 영구저장)
+#   TYPE: GAMING=sym_eager_pk(기본, 누름/뗌 즉시) / TYPING=sym_defer_pk(안정화 후)
+#   TIME: 5~40ms
+# 켜지 않으면 아래 DEBOUNCE_TYPE 단일 알고리즘으로 컴파일된다.
+set(DEBOUNCE_RUNTIME true)
+
+# set(DEBOUNCE_TYPE sym_eager_pk)   # DEBOUNCE_RUNTIME 미사용 시
+
+
+# VENOM 게이밍 기능 (VIA 에서 설정, eeconfig 영구저장)
+#   KILL_SWITCH : SOCD(상반키) 처리 - LR/UD 쌍에서 나중 입력 우선(반대키 해제)
+#   KKUK(꾹)     : 2키 이상 홀드 시 터보 리피트
+set(KILL_SWITCH_ENABLE true)
+set(KKUK_ENABLE true)

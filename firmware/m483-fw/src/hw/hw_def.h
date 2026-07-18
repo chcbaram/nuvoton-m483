@@ -6,8 +6,8 @@
 #include "bsp.h"
 
 
-#define _DEF_FIRMWATRE_VERSION    "V240516R1"
-#define _DEF_BOARD_NAME           "M483-FW"
+#define _DEF_FIRMWATRE_VERSION    "V260718R1"
+#define _DEF_BOARD_NAME           "WISH-QMK-8K"
 
 
 
