@@ -14,6 +14,7 @@
 #include "host.h"
 #include "host_driver.h"
 #include "report.h"
+#include "keycode_config.h"
 #include "usb_hid/usbd_hid.h"
 
 static uint8_t usb_keyboard_leds(void)
@@ -37,8 +38,11 @@ static void usb_send_nkro(report_nkro_t *report)
 
 static void usb_send_mouse(report_mouse_t *report)
 {
-  /* Phase A: 마우스 리포트 미연결 */
+#if defined(MOUSE_ENABLE)
+  usbHidSendReportMouse((uint8_t *)report, sizeof(report_mouse_t));   /* shared EP, report id 2 */
+#else
   (void)report;
+#endif
 }
 
 static void usb_send_extra(report_extra_t *report)
@@ -75,4 +79,17 @@ uint8_t keyboard_protocol_get(void)
 bool host_can_send_nkro(void)
 {
   return usbHidKbdIsReportProtocol();
+}
+
+/*
+ * 현재 NKRO 가 실제로 활성인지 : report protocol && keymap_config.nkro(NK_TOGG).
+ * usbd_hid.c 의 weak 기본(false)을 재정의 -> `usbhid info` 의 모드 표시에 사용.
+ */
+bool usbHidNkroActive(void)
+{
+#ifdef NKRO_ENABLE
+  return usbHidKbdIsReportProtocol() && keymap_config.nkro;
+#else
+  return false;
+#endif
 }

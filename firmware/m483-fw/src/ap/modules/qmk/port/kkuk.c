@@ -48,6 +48,11 @@ static uint32_t pre_time;
 static uint32_t pre_time_delay;
 static uint8_t key_cnt = 0;
 static report_keyboard_t last_report;
+#ifdef NKRO_ENABLE
+/* NKRO 활성 시 키는 nkro_report 로 나가므로 터보(release+repress)도 그쪽을 조작해야 한다. */
+extern report_nkro_t    *nkro_report;
+static report_nkro_t     last_nkro_report;
+#endif
 
 
 
@@ -131,11 +136,22 @@ void kkuk_idle(void)
 
     switch(state)
     {
-      case KEY_ST_REPEAT:        
+      case KEY_ST_REPEAT:
+        /* release 전송.
+         * clear_keys() 는 NKRO-aware : NKRO 활성이면 nkro_report 를, 아니면 6KRO 를 비운다.
+         * 따라서 원본 저장(last_*)은 반드시 clear_keys() '앞'에서 해야 한다.
+         * (뒤에 저장하면 이미 비워진 리포트를 저장 -> 복원해도 빈 값 -> 키가 영영 사라짐) */
         memcpy(&last_report, keyboard_report, sizeof(report_keyboard_t));
+#ifdef NKRO_ENABLE
+        memcpy(&last_nkro_report, nkro_report, sizeof(report_nkro_t));
+#endif
         clear_keys();
         send_keyboard_report();
+        /* repress 전송 : 원래 상태 복원 후 재전송 */
         memcpy(keyboard_report, &last_report, sizeof(report_keyboard_t));
+#ifdef NKRO_ENABLE
+        memcpy(nkro_report, &last_nkro_report, sizeof(report_nkro_t));
+#endif
         send_keyboard_report();
         state = KEY_ST_IDLE;
         break;

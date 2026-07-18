@@ -327,6 +327,11 @@ bool usbHidSendReportEXK(uint8_t *p_data, uint16_t length)
   return shared_enqueue(p_data, length);
 }
 
+bool usbHidSendReportMouse(uint8_t *p_data, uint16_t length)
+{
+  return shared_enqueue(p_data, length);   /* report id 2, shared EP(EPD) */
+}
+
 void usbHidFlush(void)
 {
   uint32_t pri_mask;
@@ -601,6 +606,13 @@ __attribute__((weak)) void usbHidSetStatusLed(uint8_t led_bits)
   (void)led_bits;
 }
 
+/* 현재 NKRO 활성 여부 : keymap_config.nkro 는 QMK 레이어에만 있으므로 weak 훅.
+ * driver_usb.c 가 (report protocol && keymap_config.nkro) 로 재정의한다. */
+__attribute__((weak)) bool usbHidNkroActive(void)
+{
+  return false;
+}
+
 
 /*--------------------------------------------------------------------------*/
 /* CLI                                                                      */
@@ -656,6 +668,7 @@ static void cliUsbHid(cli_args_t *args)
     usbHidGetRateInfo(&info);
     cliPrintf("configured   : %s\n", g_hsusbd_Configured ? "yes" : "no");
     cliPrintf("protocol     : %s\n", usbHidKbdIsReportProtocol() ? "report(NKRO ok)" : "boot");
+    cliPrintf("kbd mode     : %s\n", usbHidNkroActive() ? "NKRO (EPD/shared)" : "6KRO (EPA)");
     cliPrintf("sof rate     : %d Hz\n", (int)info.freq_hz);
     cliPrintf("reset count  : %d\n", (int)reset_count);
     cliPrintf("suspend count: %d\n", (int)suspend_count);

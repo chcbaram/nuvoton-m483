@@ -78,10 +78,12 @@ void    usbHidFlush(void);
 bool    usbHidSendReport(uint8_t *p_data, uint16_t length);      /* EPA : 6KRO boot */
 bool    usbHidSendReportNkro(uint8_t *p_data, uint16_t length);  /* EPD : NKRO */
 bool    usbHidSendReportEXK(uint8_t *p_data, uint16_t length);   /* EPD : system/consumer */
+bool    usbHidSendReportMouse(uint8_t *p_data, uint16_t length); /* EPD : mouse(report id 2) */
 bool    usbHidSendReportVia(uint8_t *p_data, uint16_t length);   /* EPB : VIA 응답 */
 void    usbHidSetViaReceiveFunc(usb_hid_via_rx_func_t fn);       /* VIA OUT 콜백 등록 */
 uint8_t usbHidGetKbdLeds(void);                                  /* host LED 상태 */
 bool    usbHidKbdIsReportProtocol(void);                         /* NKRO 가능(=report protocol) */
+bool    usbHidNkroActive(void);                                  /* 현재 NKRO 활성(weak, QMK가 재정의) */
 bool    usbHidIsReady(void);                                     /* 열거 완료 여부 */
 
 /* ---- 측정 ---- */

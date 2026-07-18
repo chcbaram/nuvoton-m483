@@ -122,7 +122,49 @@ uint8_t HID_SharedReportDescriptor[] __attribute__((aligned(4))) =
     0x95, 0xF0,             /* Report Count(240) */
     0x75, 0x01,
     0x81, 0x02,             /* Input(Data,Var,Abs) => key bits */
-    0xC0            /* End Collection */
+    0xC0,               /* End Collection */
+
+    /* Mouse (report id 2) : buttons(5) + X/Y(int8) + wheel(V) + pan(H) */
+    0x05, 0x01,         /* Usage Page(Generic Desktop) */
+    0x09, 0x02,         /* Usage(Mouse) */
+    0xA1, 0x01,         /* Collection(Application) */
+    0x85, 0x02,             /* Report ID(2) */
+    0x09, 0x01,             /* Usage(Pointer) */
+    0xA1, 0x00,             /* Collection(Physical) */
+    0x05, 0x09,                 /* Usage Page(Button) */
+    0x19, 0x01,
+    0x29, 0x05,                 /* buttons 1..5 */
+    0x15, 0x00,
+    0x25, 0x01,
+    0x95, 0x05,                 /* Report Count(5) */
+    0x75, 0x01,                 /* Report Size(1) */
+    0x81, 0x02,                 /* Input(Data,Var,Abs) => buttons */
+    0x95, 0x01,
+    0x75, 0x03,
+    0x81, 0x01,                 /* Input(Const) => padding */
+    0x05, 0x01,                 /* Usage Page(Generic Desktop) */
+    0x09, 0x30,                 /* Usage(X) */
+    0x09, 0x31,                 /* Usage(Y) */
+    0x15, 0x81,                 /* Logical Min(-127) */
+    0x25, 0x7F,                 /* Logical Max(127) */
+    0x75, 0x08,
+    0x95, 0x02,                 /* Report Count(2) => X,Y */
+    0x81, 0x06,                 /* Input(Data,Var,Rel) */
+    0x09, 0x38,                 /* Usage(Wheel) */
+    0x15, 0x81,
+    0x25, 0x7F,
+    0x75, 0x08,
+    0x95, 0x01,                 /* Report Count(1) => V wheel */
+    0x81, 0x06,                 /* Input(Data,Var,Rel) */
+    0x05, 0x0C,                 /* Usage Page(Consumer) */
+    0x0A, 0x38, 0x02,           /* Usage(AC Pan) */
+    0x15, 0x81,
+    0x25, 0x7F,
+    0x75, 0x08,
+    0x95, 0x01,                 /* Report Count(1) => H pan */
+    0x81, 0x06,                 /* Input(Data,Var,Rel) */
+    0xC0,               /* End Collection(Physical) */
+    0xC0            /* End Collection(Application) */
 };
 
 
