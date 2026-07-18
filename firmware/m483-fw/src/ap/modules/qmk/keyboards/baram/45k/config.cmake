@@ -15,3 +15,9 @@ set(DEBOUNCE_RUNTIME true)
 #   KKUK(꾹)     : 2키 이상 홀드 시 터보 리피트
 set(KILL_SWITCH_ENABLE true)
 set(KKUK_ENABLE true)
+
+# RGB Matrix (per-key SK6812/WS2812). 백엔드 = driver/rgb_matrix_drivers.c -> ws2812.c
+set(RGB_MATRIX_ENABLE true)
+
+#   HOLD_OKP : Hold On Other Key Press 를 VIA 에서 런타임 on/off (per-key 콜백)
+set(HOLD_OKP_RUNTIME true)

@@ -22,6 +22,9 @@
 #ifdef KKUK_ENABLE
 #include "kkuk.h"
 #endif
+#ifdef HOLD_OKP_RUNTIME
+#include "hold_okp.h"
+#endif
 
 
 void via_custom_value_command_kb(uint8_t *data, uint8_t length)
@@ -67,6 +70,14 @@ void via_custom_value_command_kb(uint8_t *data, uint8_t length)
   if (*channel_id == id_qmk_kkuk)
   {
     via_qmk_kkuk_command(data, length);
+    return;
+  }
+#endif
+
+#ifdef HOLD_OKP_RUNTIME
+  if (*channel_id == id_qmk_hold_okp)
+  {
+    via_qmk_hold_okp_command(data, length);
     return;
   }
 #endif

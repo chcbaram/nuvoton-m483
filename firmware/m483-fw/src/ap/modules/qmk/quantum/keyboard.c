@@ -679,7 +679,17 @@ void keyboard_task(void) {
     led_matrix_task();
 #endif
 #ifdef RGB_MATRIX_ENABLE
-    rgb_matrix_task();
+    /* [M483 8K 게이밍 로컬 패치] rgb_matrix_task 를 매 루프가 아니라 ~1ms 간격으로만 호출.
+     * 매트릭스 스캔(matrix_task, 위)은 매 루프 그대로 돌아 입력 레이턴시를 RGB 렌더 부하와
+     * 분리한다. RGB 는 1kHz task 로도 60fps 렌더에 충분. (stock 대비 유일한 수정점) */
+    {
+        static uint32_t rgb_task_last_ms = 0;
+        uint32_t        now_ms = timer_read32();
+        if (now_ms != rgb_task_last_ms) {
+            rgb_task_last_ms = now_ms;
+            rgb_matrix_task();
+        }
+    }
 #endif
 
 #if defined(BACKLIGHT_ENABLE)

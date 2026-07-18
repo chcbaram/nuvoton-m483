@@ -30,3 +30,34 @@
 /* eager 디바운스: 눌림 에지는 즉시 등록(지연 무영향), 이후 DEBOUNCE ms 재감지 잠금.
  * (Phase B 에서 VIA 런타임 조절 예정) */
 #define DEBOUNCE                    20
+
+
+/*----------------------------------------------------------------------------*/
+/* RGB Matrix (per-key SK6812/WS2812, 회로도상 45개 체인 = HW_WS2812_MAX_CH)    */
+/*----------------------------------------------------------------------------*/
+#define RGB_MATRIX_LED_COUNT          45     /* == hw_def.h HW_WS2812_MAX_CH */
+#define RGB_MATRIX_MAXIMUM_BRIGHTNESS 128    /* 전력 예산 (VIA 밝기 0~255 를 이 안으로 스케일) */
+#define RGB_MATRIX_DEFAULT_VAL        80
+#define RGB_MATRIX_DEFAULT_ON         true
+#define RGB_MATRIX_DEFAULT_MODE       RGB_MATRIX_CYCLE_LEFT_RIGHT
+#define RGB_MATRIX_SLEEP
+/* LED_PROCESS_LIMIT 은 정의하지 않음 -> QMK 기본 청킹((45+4)/5=9) 으로 per-call CPU 최소화(8K) */
+
+/* 이펙트 (qmk-zephyr wish40 세트) — VIA Lighting 드롭다운 순서와 일치해야 함 */
+#define ENABLE_RGB_MATRIX_GRADIENT_UP_DOWN
+#define ENABLE_RGB_MATRIX_GRADIENT_LEFT_RIGHT
+#define ENABLE_RGB_MATRIX_BREATHING
+#define ENABLE_RGB_MATRIX_BAND_VAL
+#define ENABLE_RGB_MATRIX_BAND_PINWHEEL_VAL
+#define ENABLE_RGB_MATRIX_BAND_SPIRAL_VAL
+#define ENABLE_RGB_MATRIX_CYCLE_ALL
+#define ENABLE_RGB_MATRIX_CYCLE_LEFT_RIGHT
+#define ENABLE_RGB_MATRIX_CYCLE_UP_DOWN
+#define ENABLE_RGB_MATRIX_RAINBOW_MOVING_CHEVRON
+#define ENABLE_RGB_MATRIX_CYCLE_OUT_IN
+#define ENABLE_RGB_MATRIX_CYCLE_OUT_IN_DUAL
+#define ENABLE_RGB_MATRIX_CYCLE_PINWHEEL
+#define ENABLE_RGB_MATRIX_CYCLE_SPIRAL
+#define ENABLE_RGB_MATRIX_RAINBOW_BEACON
+#define ENABLE_RGB_MATRIX_RAINBOW_PINWHEELS
+#define ENABLE_RGB_MATRIX_PIXEL_FLOW

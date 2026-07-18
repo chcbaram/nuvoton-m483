@@ -24,6 +24,7 @@ extern "C" {
 bool ws2812Init(void);
 void ws2812SetColor(uint32_t ch, uint32_t color);
 bool ws2812Refresh(void);
+void ws2812Poll(void);      /* busy 로 skip 된 프레임 재시도 (슈퍼루프에서 매 회 호출) */
 
 
 #endif

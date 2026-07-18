@@ -99,6 +99,24 @@ if (KKUK_ENABLE)
   add_compile_definitions(KKUK_ENABLE)
   list(APPEND QMK_SRC_FILES ${QMK_ROOT_PATH}/port/kkuk.c)
 endif()
+if (HOLD_OKP_RUNTIME)
+  # per-key 콜백 경로 활성화 -> hold_okp.c 의 get_hold_on_other_key_press() 가 eeconfig 값 반환
+  add_compile_definitions(HOLD_OKP_RUNTIME)
+  add_compile_definitions(HOLD_ON_OTHER_KEY_PRESS_PER_KEY)
+  list(APPEND QMK_SRC_FILES ${QMK_ROOT_PATH}/port/hold_okp.c)
+endif()
+
+# RGB Matrix (per-key). stock rgb_matrix_drivers.c 는 컴파일 안 하고 보드 driver/ 가 대체.
+# 애니메이션(.inc/*.h)는 rgb_matrix.c 가 include 로 끌어온다(파일 나열 불필요).
+if (RGB_MATRIX_ENABLE)
+  add_compile_definitions(RGB_MATRIX_ENABLE)
+  list(APPEND QMK_SRC_FILES
+    ${QMK_ROOT_PATH}/quantum/rgb_matrix/rgb_matrix.c
+    ${QMK_ROOT_PATH}/quantum/process_keycode/process_rgb.c
+    ${QMK_KEYBOARD_PATH}/driver/rgb_matrix_drivers.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/lib/lib8tion/lib8tion.c
+  )
+endif()
 
 # 보드별 port/*.c (via_port.c 등)
 file(GLOB QMK_BOARD_PORT CONFIGURE_DEPENDS ${QMK_KEYBOARD_PATH}/port/*.c)
@@ -123,6 +141,11 @@ set(QMK_INC_DIR
   ${QMK_ROOT_PATH}/quantum/sequencer
   ${QMK_ROOT_PATH}/quantum/send_string
   ${QMK_ROOT_PATH}/quantum/process_keycode
+  ${QMK_ROOT_PATH}/quantum/rgblight
+  ${QMK_ROOT_PATH}/quantum/rgb_matrix
+  ${QMK_ROOT_PATH}/quantum/rgb_matrix/animations
+  ${QMK_ROOT_PATH}/quantum/rgb_matrix/animations/runners
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/lib/lib8tion
   ${QMK_KEYBOARD_PATH}
 )
 
