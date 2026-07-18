@@ -318,6 +318,15 @@
 								14,
 								1
 							]
+						},
+						{
+							"label": "NKRO (Full Key Rollover)",
+							"type": "toggle",
+							"content": [
+								"id_qmk_nkro_enable",
+								15,
+								1
+							]
 						}
 					]
 				}

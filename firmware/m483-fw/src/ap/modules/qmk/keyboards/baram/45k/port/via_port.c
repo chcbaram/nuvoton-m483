@@ -27,6 +27,46 @@
 #endif
 
 
+#ifdef NKRO_ENABLE
+/* NKRO 토글 (QMK 네이티브 keymap_config.nkro). 별도 eeconfig 불필요 - keymap 에 저장됨. */
+enum via_qmk_nkro_value {
+    id_qmk_nkro_enable = 1,
+};
+
+static void via_qmk_nkro_command(uint8_t *data, uint8_t length)
+{
+  uint8_t *command_id = &(data[0]);
+  uint8_t *value_id   = &(data[2]);
+  uint8_t *value_data = &(data[3]);
+
+  switch (*command_id)
+  {
+    case id_custom_set_value:
+      if (*value_id == id_qmk_nkro_enable)
+      {
+        keymap_config.nkro = value_data[0] ? 1 : 0;
+        eeconfig_update_keymap(keymap_config.raw);
+        clear_keyboard();   /* 모드 전환 시 눌린 키 잔상 제거 */
+      }
+      break;
+
+    case id_custom_get_value:
+      if (*value_id == id_qmk_nkro_enable)
+        value_data[0] = keymap_config.nkro;
+      break;
+
+    case id_custom_save:
+      /* set 시 이미 eeconfig 반영됨 */
+      break;
+
+    default:
+      *command_id = id_unhandled;
+      break;
+  }
+}
+#endif
+
+
 void via_custom_value_command_kb(uint8_t *data, uint8_t length)
 {
   // data = [ command_id, channel_id, value_id, value_data ]
@@ -78,6 +118,14 @@ void via_custom_value_command_kb(uint8_t *data, uint8_t length)
   if (*channel_id == id_qmk_hold_okp)
   {
     via_qmk_hold_okp_command(data, length);
+    return;
+  }
+#endif
+
+#ifdef NKRO_ENABLE
+  if (*channel_id == id_qmk_nkro)
+  {
+    via_qmk_nkro_command(data, length);
     return;
   }
 #endif

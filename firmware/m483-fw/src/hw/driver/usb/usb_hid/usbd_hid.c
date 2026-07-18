@@ -38,8 +38,10 @@ static volatile uint32_t kbd_head = 0;
 static volatile uint32_t kbd_tail = 0;
 
 static volatile uint32_t press_us = 0;
-static volatile uint32_t inflight_press_us = 0;
+static volatile uint32_t inflight_press_us = 0;    /* EPA(6KRO) 경로 */
 static volatile uint32_t inflight_queue_us = 0;
+static volatile uint32_t inflight_press_us_d = 0;  /* EPD(NKRO) 경로 */
+static volatile uint32_t inflight_queue_us_d = 0;
 
 /*--------------------------------------------------------------------------*/
 /* Shared(EPD) 리포트 큐 : NKRO / system / consumer                          */
@@ -48,6 +50,8 @@ typedef struct
 {
   uint8_t  data[SHARED_REPORT_SIZE];
   uint16_t length;
+  uint32_t press_us;   /* 접점 시각 (NKRO 눌림 리포트만 != 0) */
+  uint32_t queue_us;   /* 큐 적재 시각 */
 } shared_report_t;
 
 static volatile uint8_t  epd_ready = 0;
@@ -307,7 +311,13 @@ static bool shared_enqueue(uint8_t *p_data, uint16_t length)
     shd_tail = (shd_tail + 1) & HID_Q_MASK;
 
   memcpy(shd_q[shd_head].data, p_data, length);
-  shd_q[shd_head].length = length;
+  shd_q[shd_head].length   = length;
+  shd_q[shd_head].press_us = press_us;
+  shd_q[shd_head].queue_us = micros();
+  /* press_us 소비 : NKRO 모드에선 키 눌림이 EPA 대신 이 EPD 경로로 나가므로
+   * 여기서 접점시각을 소비해야 레이턴시가 측정된다. 릴리즈/system/consumer/mouse 는
+   * press_us=0 -> EP 핸들러가 측정을 건너뛴다. */
+  press_us = 0;
   shd_head = next;
 
   if (!pri_mask)
@@ -362,6 +372,8 @@ void usbHidFlush(void)
   {
     shared_report_t *r = &shd_q[shd_tail];
 
+    inflight_press_us_d = r->press_us;
+    inflight_queue_us_d = r->queue_us;
     epd_ready = 0;
 
     for (i = 0; i < r->length; i++)
@@ -400,6 +412,20 @@ void usbHidEpAHandler(void)
 /* Shared(EPD) 전송 완료 (IRQ, TXPKIF) */
 void usbHidEpDHandler(void)
 {
+  uint32_t tx_done_us = micros();
+
+  /* NKRO 눌림 리포트(press_us!=0)에만 레이턴시 갱신 -> raw = pre + usb.
+   * 릴리즈/system/consumer/mouse(press_us=0) 는 측정 제외. (EPA 핸들러와 동일) */
+  if (inflight_press_us_d != 0)
+  {
+    latency.usb_us = (uint16_t)(tx_done_us - inflight_queue_us_d);
+    latency.raw_us = (uint16_t)(tx_done_us - inflight_press_us_d);
+    latency.pre_us = (uint16_t)(inflight_queue_us_d - inflight_press_us_d);
+    latency.seq++;
+    inflight_press_us_d = 0;
+  }
+  inflight_queue_us_d = 0;
+
   epd_ready = 1;
   usbHidFlush();
 }
