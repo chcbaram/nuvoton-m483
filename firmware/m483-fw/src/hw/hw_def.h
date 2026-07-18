@@ -47,6 +47,10 @@
 #define _USE_HW_WS2812
 #define      HW_WS2812_MAX_CH       45     /* 실제 보드 LED 개수에 맞게 조정 */
 
+#define _USE_HW_KEYS
+#define      HW_KEYS_MATRIX_ROWS    4
+#define      HW_KEYS_MATRIX_COLS    12
+
 
 //-- USE CLI
 //
@@ -55,6 +59,7 @@
 #define _USE_CLI_HW_I2C             1
 #define _USE_CLI_HW_EEPROM          1
 #define _USE_CLI_HW_WS2812          1
+#define _USE_CLI_HW_KEYS            1
 
 
 #endif
