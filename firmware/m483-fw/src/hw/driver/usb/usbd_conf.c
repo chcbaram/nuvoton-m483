@@ -257,16 +257,47 @@ void USBD20_IRQHandler(void)
     }
   }
 
-  /* Keyboard interrupt-IN endpoint (EPA) */
+  /* EPA : keyboard interrupt-IN (TXPKIF = 전송완료) */
   if (IrqStL & HSUSBD_GINTSTS_EPAIF_Msk)
   {
     IrqSt = HSUSBD->EP[EPA].EPINTSTS & HSUSBD->EP[EPA].EPINTEN;
 
     HSUSBD_ENABLE_EP_INT(EPA, 0);
-    /* 데이터 패킷 전송 완료(TXPKIF) 시점에만 완료 처리 */
     if (IrqSt & HSUSBD_EPINTSTS_TXPKIF_Msk)
-      usbHidEpHandler();
+      usbHidEpAHandler();
     HSUSBD_CLR_EP_INT_FLAG(EPA, IrqSt);
+  }
+
+  /* EPB : VIA interrupt-IN (TXPKIF = 응답 전송완료) */
+  if (IrqStL & HSUSBD_GINTSTS_EPBIF_Msk)
+  {
+    IrqSt = HSUSBD->EP[EPB].EPINTSTS & HSUSBD->EP[EPB].EPINTEN;
+
+    HSUSBD_ENABLE_EP_INT(EPB, 0);
+    if (IrqSt & HSUSBD_EPINTSTS_TXPKIF_Msk)
+      usbHidEpBHandler();
+    HSUSBD_CLR_EP_INT_FLAG(EPB, IrqSt);
+  }
+
+  /* EPC : VIA interrupt-OUT (RXPKIF = 명령 수신) */
+  if (IrqStL & HSUSBD_GINTSTS_EPCIF_Msk)
+  {
+    IrqSt = HSUSBD->EP[EPC].EPINTSTS & HSUSBD->EP[EPC].EPINTEN;
+
+    if (IrqSt & HSUSBD_EPINTSTS_RXPKIF_Msk)
+      usbHidEpCHandler();
+    HSUSBD_CLR_EP_INT_FLAG(EPC, IrqSt);
+  }
+
+  /* EPD : shared interrupt-IN (NKRO/system/consumer, TXPKIF = 전송완료) */
+  if (IrqStL & HSUSBD_GINTSTS_EPDIF_Msk)
+  {
+    IrqSt = HSUSBD->EP[EPD].EPINTSTS & HSUSBD->EP[EPD].EPINTEN;
+
+    HSUSBD_ENABLE_EP_INT(EPD, 0);
+    if (IrqSt & HSUSBD_EPINTSTS_TXPKIF_Msk)
+      usbHidEpDHandler();
+    HSUSBD_CLR_EP_INT_FLAG(EPD, IrqSt);
   }
 }
 

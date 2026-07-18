@@ -1,10 +1,12 @@
 /*
  * usbd_hid.c
  *
- *  HSUSBD HID keyboard class layer.
- *  - endpoint 구성, HID class 요청 처리 (Nuvoton BSP HSUSBD_HID_MouseKeyboard 이식)
- *  - 리포트 큐 + usbHidSendReport()/usbHidFlush() (baram-qmk-8k 패턴 미러링)
- *  - 폴링레이트(SOF) / 키스트로크 레이턴시 측정
+ *  HSUSBD HID 복합장치 클래스 레이어 (QMK 네이티브 3-인터페이스).
+ *   IF0 Keyboard : EPA IN 8B  (boot 6KRO, 8K)  + LED SET_REPORT + SET_PROTOCOL(NKRO 판정)
+ *   IF1 Raw/VIA  : EPB IN 32B / EPC OUT 32B      (in-place echo)
+ *   IF2 Shared   : EPD IN 32B  (NKRO/system/consumer, report-id 멀티플렉스, 8K)
+ *
+ *  전송은 QMK host_driver_t(port/driver_usb.c)에서만 호출된다.
  */
 
 #include "usbd_hid.h"
@@ -12,50 +14,73 @@
 #ifdef _USE_HW_USB
 
 #include "cli.h"
+#include <string.h>
 
 
-#define HID_Q_MAX             16      /* 리포트 링버퍼 깊이 (2의 거듭제곱) */
+#define HID_Q_MAX             16      /* 링버퍼 깊이 (2의 거듭제곱) */
 #define HID_Q_MASK            (HID_Q_MAX - 1)
 
 
+/*--------------------------------------------------------------------------*/
+/* 키보드(EPA) 리포트 큐 + 레이턴시 계측                                     */
+/*--------------------------------------------------------------------------*/
 typedef struct
 {
   uint8_t  data[HID_KBD_REPORT_SIZE];
   uint16_t length;
-  uint32_t press_us;     /* 접점(버튼) 발생 시각 */
-  uint32_t queue_us;     /* 큐 적재 시각 */
-} hid_report_t;
+  uint32_t press_us;
+  uint32_t queue_us;
+} kbd_report_t;
 
+static volatile uint8_t  epa_ready = 0;
+static kbd_report_t      kbd_q[HID_Q_MAX];
+static volatile uint32_t kbd_head = 0;
+static volatile uint32_t kbd_tail = 0;
 
-static volatile uint8_t  is_ep_ready = 0;
-
-static hid_report_t      report_q[HID_Q_MAX];
-static volatile uint32_t q_head = 0;
-static volatile uint32_t q_tail = 0;
-
-/* 현재 접점 시각 (버튼 눌림/뗌 에지에서 갱신) */
 static volatile uint32_t press_us = 0;
-
-/* 전송 중(in-flight) 리포트의 타임스탬프 */
 static volatile uint32_t inflight_press_us = 0;
 static volatile uint32_t inflight_queue_us = 0;
 
-/* 측정 결과 */
-static volatile usb_hid_latency_t  latency;
+/*--------------------------------------------------------------------------*/
+/* Shared(EPD) 리포트 큐 : NKRO / system / consumer                          */
+/*--------------------------------------------------------------------------*/
+typedef struct
+{
+  uint8_t  data[SHARED_REPORT_SIZE];
+  uint16_t length;
+} shared_report_t;
+
+static volatile uint8_t  epd_ready = 0;
+static shared_report_t   shd_q[HID_Q_MAX];
+static volatile uint32_t shd_head = 0;
+static volatile uint32_t shd_tail = 0;
+
+/*--------------------------------------------------------------------------*/
+/* VIA(EPB IN / EPC OUT)                                                     */
+/*--------------------------------------------------------------------------*/
+static volatile uint8_t        epb_ready = 0;
+static usb_hid_via_rx_func_t   via_rx_func = NULL;
+static uint8_t                 via_out_buf[VIA_REPORT_SIZE];
+
+/*--------------------------------------------------------------------------*/
+/* 측정 / 상태                                                               */
+/*--------------------------------------------------------------------------*/
+static volatile usb_hid_latency_t   latency;
 static volatile usb_hid_rate_info_t rate_info;
 
-/* SOF 기반 폴링레이트 측정 */
 static volatile uint32_t sof_count    = 0;
 static volatile uint32_t sof_last_us  = 0;
 static volatile uint32_t sof_min_us   = 0xFFFFFFFF;
 static volatile uint32_t sof_max_us   = 0;
 static volatile uint32_t sof_win_ms   = 0;
 
-/* 링크 상태 */
 static volatile uint32_t reset_count   = 0;
 static volatile uint32_t suspend_count = 0;
 
-/* 호스트 LED 상태 */
+/* 키보드 인터페이스 프로토콜 (NKRO 가능 판정용). 기본 report protocol. */
+static volatile uint8_t  kbd_protocol = HID_REPORT_PROTOCOL;
+
+/* 호스트 LED 상태 (SET_REPORT output) */
 uint8_t au8LED_Status[8];
 
 #ifdef _USE_HW_CLI
@@ -63,18 +88,25 @@ static void cliUsbHid(cli_args_t *args);
 #endif
 
 
+/*--------------------------------------------------------------------------*/
+/* Endpoint 구성                                                             */
+/*--------------------------------------------------------------------------*/
 void usbHidInit(void)
 {
-  is_ep_ready = 0;
-  q_head = 0;
-  q_tail = 0;
+  epa_ready = 0;
+  epd_ready = 0;
+  epb_ready = 0;
+  kbd_head = kbd_tail = 0;
+  shd_head = shd_tail = 0;
 
-  /* Enable USB BUS, CEP and EPA global interrupt */
+  /* USB/CEP + EPA(kbd IN)/EPB(via IN)/EPC(via OUT)/EPD(shared IN) 글로벌 인터럽트 */
   HSUSBD_ENABLE_USB_INT(HSUSBD_GINTEN_USBIEN_Msk |
                         HSUSBD_GINTEN_CEPIEN_Msk |
-                        HSUSBD_GINTEN_EPAIEN_Msk);
+                        HSUSBD_GINTEN_EPAIEN_Msk |
+                        HSUSBD_GINTEN_EPBIEN_Msk |
+                        HSUSBD_GINTEN_EPCIEN_Msk |
+                        HSUSBD_GINTEN_EPDIEN_Msk);
 
-  /* Enable BUS interrupt (+ SOF for polling-rate measurement) */
   HSUSBD_ENABLE_BUS_INT(HSUSBD_BUSINTEN_DMADONEIEN_Msk |
                         HSUSBD_BUSINTEN_RESUMEIEN_Msk |
                         HSUSBD_BUSINTEN_RSTIEN_Msk |
@@ -88,38 +120,66 @@ void usbHidInit(void)
   HSUSBD_SetEpBufAddr(CEP, CEP_BUF_BASE, CEP_BUF_LEN);
   HSUSBD_ENABLE_CEP_INT(HSUSBD_CEPINTEN_SETUPPKIEN_Msk | HSUSBD_CEPINTEN_STSDONEIEN_Msk);
 
-  /* EPA ==> Interrupt IN endpoint, keyboard */
+  /* EPA : keyboard interrupt IN */
   HSUSBD_SetEpBufAddr(EPA, EPA_BUF_BASE, EPA_BUF_LEN);
   HSUSBD_SET_MAX_PAYLOAD(EPA, EPA_MAX_PKT_SIZE);
   HSUSBD_ConfigEp(EPA, INT_IN_EP_NUM_KB, HSUSBD_EP_CFG_TYPE_INT, HSUSBD_EP_CFG_DIR_IN);
 
-  is_ep_ready = 1;
+  /* EPB : VIA interrupt IN */
+  HSUSBD_SetEpBufAddr(EPB, EPB_BUF_BASE, EPB_BUF_LEN);
+  HSUSBD_SET_MAX_PAYLOAD(EPB, EPB_MAX_PKT_SIZE);
+  HSUSBD_ConfigEp(EPB, INT_IN_EP_NUM_VIA, HSUSBD_EP_CFG_TYPE_INT, HSUSBD_EP_CFG_DIR_IN);
+
+  /* EPC : VIA interrupt OUT */
+  HSUSBD_SetEpBufAddr(EPC, EPC_BUF_BASE, EPC_BUF_LEN);
+  HSUSBD_SET_MAX_PAYLOAD(EPC, EPC_MAX_PKT_SIZE);
+  HSUSBD_ConfigEp(EPC, OUT_EP_NUM_VIA, HSUSBD_EP_CFG_TYPE_INT, HSUSBD_EP_CFG_DIR_OUT);
+  HSUSBD_ENABLE_EP_INT(EPC, HSUSBD_EPINTEN_RXPKIEN_Msk);
+
+  /* EPD : shared interrupt IN (NKRO/system/consumer) */
+  HSUSBD_SetEpBufAddr(EPD, EPD_BUF_BASE, EPD_BUF_LEN);
+  HSUSBD_SET_MAX_PAYLOAD(EPD, EPD_MAX_PKT_SIZE);
+  HSUSBD_ConfigEp(EPD, INT_IN_EP_NUM_SHARED, HSUSBD_EP_CFG_TYPE_INT, HSUSBD_EP_CFG_DIR_IN);
+
+  epa_ready = 1;
+  epb_ready = 1;
+  epd_ready = 1;
 }
 
 /*--------------------------------------------------------------------------*/
-/* HID class request (keyboard interface 0)                                 */
+/* HID class request                                                        */
 /*--------------------------------------------------------------------------*/
 void HID_ClassRequest(void)
 {
-  static uint8_t u8Report = 0;
-  static uint8_t u8Idle   = 0;
+  static uint8_t u8Idle = 0;
 
   if (gUsbCmd.bmRequestType & 0x80)   /* Device to host */
   {
     switch (gUsbCmd.bRequest)
     {
       case HID_GET_REPORT:
+      {
+        static uint8_t u8Report = 0;
         HSUSBD_PrepareCtrlIn(&u8Report, 1ul);
         HSUSBD_CLR_CEP_INT_FLAG(HSUSBD_CEPINTSTS_INTKIF_Msk);
         HSUSBD_ENABLE_CEP_INT(HSUSBD_CEPINTEN_INTKIEN_Msk);
         break;
-
+      }
       case HID_GET_IDLE:
         HSUSBD_PrepareCtrlIn(&u8Idle, 1ul);
         HSUSBD_CLR_CEP_INT_FLAG(HSUSBD_CEPINTSTS_INTKIF_Msk);
         HSUSBD_ENABLE_CEP_INT(HSUSBD_CEPINTEN_INTKIEN_Msk);
         break;
 
+      case HID_GET_PROTOCOL:
+      {
+        static uint8_t u8Proto;
+        u8Proto = kbd_protocol;
+        HSUSBD_PrepareCtrlIn(&u8Proto, 1ul);
+        HSUSBD_CLR_CEP_INT_FLAG(HSUSBD_CEPINTSTS_INTKIF_Msk);
+        HSUSBD_ENABLE_CEP_INT(HSUSBD_CEPINTEN_INTKIEN_Msk);
+        break;
+      }
       default:
         HSUSBD_SET_CEP_STATE(HSUSBD_CEPCTL_STALLEN_Msk);
         break;
@@ -146,7 +206,6 @@ void HID_ClassRequest(void)
         }
         else
         {
-          /* Feature/other: just ack status stage */
           HSUSBD_CLR_CEP_INT_FLAG(HSUSBD_CEPINTSTS_STSDONEIF_Msk);
           HSUSBD_SET_CEP_STATE(HSUSBD_CEPCTL_NAKCLR);
           HSUSBD_ENABLE_CEP_INT(HSUSBD_CEPINTEN_STSDONEIEN_Msk);
@@ -161,6 +220,12 @@ void HID_ClassRequest(void)
         break;
 
       case HID_SET_PROTOCOL:
+        /* 키보드 인터페이스(IF0)의 boot/report 프로토콜을 추적 -> NKRO 가능 판정 */
+        if (gUsbCmd.wIndex == IF_NUM_KBD)
+        {
+          kbd_protocol = (gUsbCmd.wValue == HID_BOOT_PROTOCOL) ?
+                         HID_BOOT_PROTOCOL : HID_REPORT_PROTOCOL;
+        }
         HSUSBD_CLR_CEP_INT_FLAG(HSUSBD_CEPINTSTS_STSDONEIF_Msk);
         HSUSBD_SET_CEP_STATE(HSUSBD_CEPCTL_NAKCLR);
         HSUSBD_ENABLE_CEP_INT(HSUSBD_CEPINTEN_STSDONEIEN_Msk);
@@ -175,12 +240,12 @@ void HID_ClassRequest(void)
 
 void HID_VendorRequest(void)
 {
-  /* No vendor request supported: stall */
   HSUSBD_SET_CEP_STATE(HSUSBD_CEPCTL_STALLEN_Msk);
 }
 
+
 /*--------------------------------------------------------------------------*/
-/* Report queue + flush                                                     */
+/* 키보드(EPA) 전송 : 큐 + flush + 레이턴시                                   */
 /*--------------------------------------------------------------------------*/
 bool usbHidSendReport(uint8_t *p_data, uint16_t length)
 {
@@ -189,26 +254,25 @@ bool usbHidSendReport(uint8_t *p_data, uint16_t length)
 
   if (p_data == NULL)
     return false;
-
   if (length > HID_KBD_REPORT_SIZE)
     length = HID_KBD_REPORT_SIZE;
 
   pri_mask = __get_PRIMASK();
   __disable_irq();
 
-  next = (q_head + 1) & HID_Q_MASK;
-  if (next == q_tail)
-  {
-    /* 큐가 가득 참 -> 가장 오래된 리포트 폐기 (호스트가 stale 상태를 붙잡지 않도록) */
-    q_tail = (q_tail + 1) & HID_Q_MASK;
-  }
+  next = (kbd_head + 1) & HID_Q_MASK;
+  if (next == kbd_tail)
+    kbd_tail = (kbd_tail + 1) & HID_Q_MASK;   /* full -> drop oldest */
 
-  memset(report_q[q_head].data, 0, HID_KBD_REPORT_SIZE);
-  memcpy(report_q[q_head].data, p_data, length);
-  report_q[q_head].length   = length;
-  report_q[q_head].press_us = press_us;
-  report_q[q_head].queue_us = micros();
-  q_head = next;
+  memset(kbd_q[kbd_head].data, 0, HID_KBD_REPORT_SIZE);
+  memcpy(kbd_q[kbd_head].data, p_data, length);
+  kbd_q[kbd_head].length   = length;
+  kbd_q[kbd_head].press_us = press_us;
+  kbd_q[kbd_head].queue_us = micros();
+  /* press_us 소비 : 새 눌림에만 matrix 가 다시 세팅한다. 릴리즈/후속 리포트는
+   * press_us=0 -> EP 핸들러가 raw/pre 를 건너뛰어, log 가 항상 '눌림 지연'만 보이게 함. */
+  press_us = 0;
+  kbd_head = next;
 
   if (!pri_mask)
     __enable_irq();
@@ -217,62 +281,182 @@ bool usbHidSendReport(uint8_t *p_data, uint16_t length)
   return true;
 }
 
+/* shared(EPD) 큐 적재 헬퍼 (NKRO/system/consumer 공용) */
+static bool shared_enqueue(uint8_t *p_data, uint16_t length)
+{
+  uint32_t next;
+  uint32_t pri_mask;
+
+  if (p_data == NULL)
+    return false;
+  if (length > SHARED_REPORT_SIZE)
+    length = SHARED_REPORT_SIZE;
+
+  pri_mask = __get_PRIMASK();
+  __disable_irq();
+
+  next = (shd_head + 1) & HID_Q_MASK;
+  if (next == shd_tail)
+    shd_tail = (shd_tail + 1) & HID_Q_MASK;
+
+  memcpy(shd_q[shd_head].data, p_data, length);
+  shd_q[shd_head].length = length;
+  shd_head = next;
+
+  if (!pri_mask)
+    __enable_irq();
+
+  usbHidFlush();
+  return true;
+}
+
+bool usbHidSendReportNkro(uint8_t *p_data, uint16_t length)
+{
+  return shared_enqueue(p_data, length);
+}
+
+bool usbHidSendReportEXK(uint8_t *p_data, uint16_t length)
+{
+  return shared_enqueue(p_data, length);
+}
+
 void usbHidFlush(void)
 {
   uint32_t pri_mask;
-  hid_report_t *p_report;
   uint16_t i;
 
   pri_mask = __get_PRIMASK();
   __disable_irq();
 
-  if (is_ep_ready && (q_tail != q_head))
+  /* 키보드(EPA) */
+  if (epa_ready && (kbd_tail != kbd_head))
   {
-    p_report = &report_q[q_tail];
+    kbd_report_t *r = &kbd_q[kbd_tail];
 
-    inflight_press_us = p_report->press_us;
-    inflight_queue_us = p_report->queue_us;
-
-    is_ep_ready = 0;
+    inflight_press_us = r->press_us;
+    inflight_queue_us = r->queue_us;
+    epa_ready = 0;
 
     for (i = 0; i < HID_KBD_REPORT_SIZE; i++)
-      HSUSBD->EP[EPA].EPDAT_BYTE = p_report->data[i];
-
+      HSUSBD->EP[EPA].EPDAT_BYTE = r->data[i];
     HSUSBD->EP[EPA].EPRSPCTL = HSUSBD_EP_RSPCTL_SHORTTXEN;
-    /* TXPKIF: 데이터 패킷이 실제로 호스트에 전송 완료된 시점에 인터럽트 */
     HSUSBD_ENABLE_EP_INT(EPA, HSUSBD_EPINTEN_TXPKIEN_Msk);
 
-    q_tail = (q_tail + 1) & HID_Q_MASK;
+    kbd_tail = (kbd_tail + 1) & HID_Q_MASK;
+  }
+
+  /* Shared(EPD) : NKRO/system/consumer */
+  if (epd_ready && (shd_tail != shd_head))
+  {
+    shared_report_t *r = &shd_q[shd_tail];
+
+    epd_ready = 0;
+
+    for (i = 0; i < r->length; i++)
+      HSUSBD->EP[EPD].EPDAT_BYTE = r->data[i];
+    HSUSBD->EP[EPD].EPRSPCTL = HSUSBD_EP_RSPCTL_SHORTTXEN;
+    HSUSBD_ENABLE_EP_INT(EPD, HSUSBD_EPINTEN_TXPKIEN_Msk);
+
+    shd_tail = (shd_tail + 1) & HID_Q_MASK;
   }
 
   if (!pri_mask)
     __enable_irq();
 }
 
-/* 키보드 EP(EPA) 패킷 전송 완료 (IRQ, TXPKIF) */
-void usbHidEpHandler(void)
+/* 키보드(EPA) 전송 완료 (IRQ, TXPKIF) */
+void usbHidEpAHandler(void)
 {
-  uint32_t tx_done_us = micros();   /* 패킷이 호스트로 전송 완료된 시점 */
+  uint32_t tx_done_us = micros();
 
-  /* 레이턴시 계산 (in-flight 리포트 기준) */
-  if (inflight_queue_us != 0)
+  /* 눌림 리포트(press_us!=0)에만 3값을 함께 갱신 -> 항상 raw = pre + usb, 실제 눌림 지연만.
+   * 릴리즈/후속 리포트(press_us=0)는 측정에서 제외한다. */
+  if (inflight_press_us != 0)
   {
     latency.usb_us = (uint16_t)(tx_done_us - inflight_queue_us);
-    if (inflight_press_us != 0)
-    {
-      latency.raw_us = (uint16_t)(tx_done_us - inflight_press_us);
-      latency.pre_us = (uint16_t)(inflight_queue_us - inflight_press_us);
-    }
+    latency.raw_us = (uint16_t)(tx_done_us - inflight_press_us);
+    latency.pre_us = (uint16_t)(inflight_queue_us - inflight_press_us);
     latency.seq++;
-    inflight_queue_us = 0;
+    inflight_press_us = 0;
   }
+  inflight_queue_us = 0;
 
-  is_ep_ready = 1;
+  epa_ready = 1;
   usbHidFlush();
 }
 
+/* Shared(EPD) 전송 완료 (IRQ, TXPKIF) */
+void usbHidEpDHandler(void)
+{
+  epd_ready = 1;
+  usbHidFlush();
+}
+
+
 /*--------------------------------------------------------------------------*/
-/* SOF 기반 폴링레이트 (버스 마이크로프레임 심박) 측정                       */
+/* VIA (EPB IN 응답 / EPC OUT 수신)                                          */
+/*--------------------------------------------------------------------------*/
+bool usbHidSendReportVia(uint8_t *p_data, uint16_t length)
+{
+  uint16_t i;
+  uint32_t pri_mask;
+
+  if (p_data == NULL)
+    return false;
+  if (length > VIA_REPORT_SIZE)
+    length = VIA_REPORT_SIZE;
+
+  pri_mask = __get_PRIMASK();
+  __disable_irq();
+
+  if (epb_ready)
+  {
+    epb_ready = 0;
+    for (i = 0; i < length; i++)
+      HSUSBD->EP[EPB].EPDAT_BYTE = p_data[i];
+    HSUSBD->EP[EPB].EPRSPCTL = HSUSBD_EP_RSPCTL_SHORTTXEN;
+    HSUSBD_ENABLE_EP_INT(EPB, HSUSBD_EPINTEN_TXPKIEN_Msk);
+  }
+
+  if (!pri_mask)
+    __enable_irq();
+  return true;
+}
+
+void usbHidSetViaReceiveFunc(usb_hid_via_rx_func_t fn)
+{
+  via_rx_func = fn;
+}
+
+/* EPB VIA IN 전송 완료 */
+void usbHidEpBHandler(void)
+{
+  epb_ready = 1;
+}
+
+/* EPC VIA OUT 수신 : 버퍼 읽기 -> 콜백(in-place 처리) -> EPB 로 응답 echo */
+void usbHidEpCHandler(void)
+{
+  uint32_t len;
+  uint32_t i;
+
+  len = HSUSBD->EP[EPC].EPDATCNT & 0xFFFF;
+  if (len > VIA_REPORT_SIZE)
+    len = VIA_REPORT_SIZE;
+
+  for (i = 0; i < len; i++)
+    via_out_buf[i] = HSUSBD->EP[EPC].EPDAT_BYTE;
+
+  if (via_rx_func != NULL)
+  {
+    via_rx_func(via_out_buf, (uint8_t)len);      /* raw_hid_receive : in-place 응답 작성 */
+    usbHidSendReportVia(via_out_buf, VIA_REPORT_SIZE);
+  }
+}
+
+
+/*--------------------------------------------------------------------------*/
+/* SOF 폴링레이트 측정                                                       */
 /*--------------------------------------------------------------------------*/
 void usbHidOnSof(void)
 {
@@ -297,10 +481,10 @@ void usbHidOnSof(void)
     rate_info.time_min = (sof_min_us == 0xFFFFFFFF) ? 0 : sof_min_us;
     rate_info.time_max = sof_max_us;
 
-    sof_count   = 0;
-    sof_min_us  = 0xFFFFFFFF;
-    sof_max_us  = 0;
-    sof_win_ms  = now_ms;
+    sof_count  = 0;
+    sof_min_us = 0xFFFFFFFF;
+    sof_max_us = 0;
+    sof_win_ms = now_ms;
   }
 }
 
@@ -308,6 +492,7 @@ void usbHidOnBusReset(void)
 {
   reset_count++;
   sof_last_us = 0;
+  kbd_protocol = HID_REPORT_PROTOCOL;   /* 리셋 시 기본 report 로 복귀 */
 }
 
 void usbHidOnSuspend(void)
@@ -315,14 +500,29 @@ void usbHidOnSuspend(void)
   suspend_count++;
 }
 
+
 /*--------------------------------------------------------------------------*/
-/* 측정 결과 getter / setter                                                */
+/* getter / setter                                                          */
 /*--------------------------------------------------------------------------*/
+uint8_t usbHidGetKbdLeds(void)
+{
+  return au8LED_Status[0];
+}
+
+bool usbHidKbdIsReportProtocol(void)
+{
+  return (kbd_protocol == HID_REPORT_PROTOCOL);
+}
+
+bool usbHidIsReady(void)
+{
+  return (g_hsusbd_Configured != 0);
+}
+
 bool usbHidGetRateInfo(usb_hid_rate_info_t *p_info)
 {
   if (p_info == NULL)
     return false;
-
   p_info->freq_hz  = rate_info.freq_hz;
   p_info->time_max = rate_info.time_max;
   p_info->time_min = rate_info.time_min;
@@ -403,23 +603,11 @@ static void cliUsbHid(cli_args_t *args)
     usb_hid_rate_info_t info;
     usbHidGetRateInfo(&info);
     cliPrintf("configured   : %s\n", g_hsusbd_Configured ? "yes" : "no");
+    cliPrintf("protocol     : %s\n", usbHidKbdIsReportProtocol() ? "report(NKRO ok)" : "boot");
     cliPrintf("sof rate     : %d Hz\n", (int)info.freq_hz);
     cliPrintf("reset count  : %d\n", (int)reset_count);
     cliPrintf("suspend count: %d\n", (int)suspend_count);
-    ret = true;
-  }
-
-  if (args->argc == 2 && args->isStr(0, "send"))
-  {
-    uint8_t  key = (uint8_t)args->getData(1);
-    uint8_t  report[HID_KBD_REPORT_SIZE] = {0, };
-
-    report[2] = key;
-    usbHidSendReport(report, HID_KBD_REPORT_SIZE);
-    delay(20);
-    memset(report, 0, HID_KBD_REPORT_SIZE);
-    usbHidSendReport(report, HID_KBD_REPORT_SIZE);
-    cliPrintf("send keycode 0x%02X\n", key);
+    cliPrintf("host leds    : 0x%02X\n", au8LED_Status[0]);
     ret = true;
   }
 
@@ -428,7 +616,6 @@ static void cliUsbHid(cli_args_t *args)
     cliPrintf("usbhid rate\n");
     cliPrintf("usbhid log\n");
     cliPrintf("usbhid info\n");
-    cliPrintf("usbhid send [keycode]\n");
   }
 }
 #endif

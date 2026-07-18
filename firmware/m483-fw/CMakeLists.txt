@@ -17,6 +17,30 @@ project(${PRJ_NAME}
 set(EXECUTABLE ${PRJ_NAME}.elf)
 
 
+# ---- QMK 통합 (보드별 소스/인클루드/정의) ----
+include(src/ap/modules/qmk/CMakeLists.txt)
+
+# feature 정의 (add_executable 전에 있어야 대상에 적용된다)
+add_compile_definitions(
+  VIA_ENABLE
+  RAW_ENABLE
+  DYNAMIC_KEYMAP_ENABLE
+  NKRO_ENABLE
+  EXTRAKEY_ENABLE
+  MOUSEKEY_ENABLE
+  MOUSE_ENABLE
+  KEY_OVERRIDE_ENABLE
+  MAGIC_ENABLE
+  DYNAMIC_KEYMAP_MACRO_DELAY=10
+)
+add_compile_definitions(QMK_KEYBOARD_H="quantum.h")
+add_compile_definitions(QMK_KEYMAP_CONFIG_H="${QMK_KEYMAP_CONFIG_H_PATH}")
+add_compile_definitions(KEYMAP_C="${QMK_KEYMAP_C_PATH}")
+
+# QMK stock 은 board config.h 가 모든 TU 앞에 정의돼 있다고 가정한다(force-include).
+# QMK 소스에만 -include 로 강제 포함하여 헤더 include 순서 의존을 없앤다.
+set_source_files_properties(${QMK_SRC_FILES} PROPERTIES
+  COMPILE_OPTIONS "-include;${QMK_KEYMAP_CONFIG_H_PATH}")
 
 
 # 지정한 폴더에 있는 파일만 포함한다.
@@ -59,6 +83,7 @@ endforeach(TMP_PATH)
 add_executable(${EXECUTABLE}
   ${SRC_FILES}
   ${SRC_FILES_RECURSE}
+  ${QMK_SRC_FILES}
 )
 
 
@@ -94,9 +119,11 @@ target_include_directories(${EXECUTABLE} PRIVATE
   src/hw/driver/usb/usb_cmp
   src/hw/driver/eeprom
 
-  src/lib/Nuvoton/CMSIS/Device/Nuvoton/M480/Include  
+  src/lib/Nuvoton/CMSIS/Device/Nuvoton/M480/Include
   src/lib/Nuvoton/CMSIS/Include
   src/lib/Nuvoton
+
+  ${QMK_INC_DIR}
 )
 
 target_compile_definitions(${EXECUTABLE} PRIVATE

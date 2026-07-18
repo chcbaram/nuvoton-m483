@@ -1,9 +1,9 @@
 /*
  * usbd_hid.h
  *
- *  HSUSBD HID keyboard class layer.
- *  공개 API 이름은 baram-qmk-8k 의 usb_hid/usbd_hid.h 를 미러링하여
- *  향후 QMK 포팅 시 호출부를 그대로 재사용할 수 있게 한다.
+ *  HSUSBD HID 복합장치 클래스 레이어 (QMK 네이티브 3-인터페이스).
+ *   - 키보드(EPA), VIA(EPB IN/EPC OUT), Shared=NKRO+System+Consumer(EPD)
+ *   - QMK 드라이버 방식(host_driver_t) 전송 API 를 제공: driver_usb.c 가 연결.
  */
 
 #ifndef SRC_HW_DRIVER_USB_USB_HID_USBD_HID_H_
@@ -33,7 +33,7 @@ enum
 /* Polling-rate / bus-frame measurement */
 typedef struct
 {
-  uint32_t freq_hz;     /* 초당 수신 SOF 수 (버스 마이크로프레임 심박; HS ~8000, FS ~1000) */
+  uint32_t freq_hz;     /* 초당 수신 SOF 수 (HS ~8000) */
   uint32_t time_max;    /* SOF 간 최대 간격 (us) */
   uint32_t time_min;    /* SOF 간 최소 간격 (us) */
 } usb_hid_rate_info_t;
@@ -41,32 +41,45 @@ typedef struct
 /* Keystroke latency breakdown (us) */
 typedef struct
 {
-  uint16_t raw_us;      /* 접점(버튼) -> USB TX 완료 */
-  uint16_t pre_us;      /* 접점 -> 리포트 큐 적재 (펌웨어) */
-  uint16_t usb_us;      /* 큐 적재 -> USB TX 완료 (USB 구간) */
+  uint16_t raw_us;      /* 접점 -> USB TX 완료 */
+  uint16_t pre_us;      /* 접점 -> 리포트 큐 적재 */
+  uint16_t usb_us;      /* 큐 적재 -> USB TX 완료 */
   uint32_t seq;         /* 전송 시퀀스 카운터 */
 } usb_hid_latency_t;
 
+/* VIA raw-HID 수신 콜백 (OUT 완료 시, in-place 처리) */
+typedef void (*usb_hid_via_rx_func_t)(uint8_t *data, uint8_t length);
+
 
 /* ---- class core (usbd_conf 의 IRQ/Open 에서 호출) ---- */
-void usbHidInit(void);          /* endpoint 구성 (BSP HID_Init 이식) */
+void usbHidInit(void);          /* endpoint 구성 */
 void HID_ClassRequest(void);    /* HID class setup 요청 처리 */
 void HID_VendorRequest(void);   /* vendor 요청 (stub) */
-void usbHidEpHandler(void);     /* 키보드 EP(EPA) IN 완료 처리 (IRQ) */
-void usbHidOnSof(void);         /* SOF 인터럽트 (폴링레이트 측정) */
-void usbHidOnBusReset(void);    /* 버스 리셋 (링크 상태) */
-void usbHidOnSuspend(void);     /* 서스펜드 (링크 상태) */
+void usbHidEpAHandler(void);    /* EPA 키보드 IN 완료(TXPKIF) */
+void usbHidEpBHandler(void);    /* EPB VIA IN 완료(TXPKIF) */
+void usbHidEpCHandler(void);    /* EPC VIA OUT 수신(RXPKIF) */
+void usbHidEpDHandler(void);    /* EPD shared IN 완료(TXPKIF) */
+void usbHidOnSof(void);
+void usbHidOnBusReset(void);
+void usbHidOnSuspend(void);
 
-/* ---- 공개 API (baram 미러링) ---- */
-void usbHidFlush(void);
-bool usbHidSendReport(uint8_t *p_data, uint16_t length);
+/* ---- QMK 드라이버 방식 전송 API ---- */
+void    usbHidFlush(void);
+bool    usbHidSendReport(uint8_t *p_data, uint16_t length);      /* EPA : 6KRO boot */
+bool    usbHidSendReportNkro(uint8_t *p_data, uint16_t length);  /* EPD : NKRO */
+bool    usbHidSendReportEXK(uint8_t *p_data, uint16_t length);   /* EPD : system/consumer */
+bool    usbHidSendReportVia(uint8_t *p_data, uint16_t length);   /* EPB : VIA 응답 */
+void    usbHidSetViaReceiveFunc(usb_hid_via_rx_func_t fn);       /* VIA OUT 콜백 등록 */
+uint8_t usbHidGetKbdLeds(void);                                  /* host LED 상태 */
+bool    usbHidKbdIsReportProtocol(void);                         /* NKRO 가능(=report protocol) */
+bool    usbHidIsReady(void);                                     /* 열거 완료 여부 */
+
+/* ---- 측정 ---- */
 bool usbHidGetRateInfo(usb_hid_rate_info_t *p_info);
 bool usbHidGetLatency(uint16_t *raw_us, uint16_t *pre_us, uint16_t *usb_us, uint32_t *seq);
+bool usbHidSetPressTime(uint32_t time_us);   /* 접점 시각 -> 레이턴시 기준 */
 
-/* 접점(버튼 눌림/뗌) 발생 시각을 us 로 전달 -> 레이턴시 계산 기준 */
-bool usbHidSetPressTime(uint32_t time_us);
-
-/* 호스트 LED(NumLock/CapsLock..) 상태 콜백 (__weak, 필요 시 재정의) */
+/* 호스트 LED 콜백 (__weak, 필요 시 재정의) */
 void usbHidSetStatusLed(uint8_t led_bits);
 
 /* CLI 등록 */

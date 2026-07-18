@@ -37,7 +37,7 @@ bool hwInit(void)
   i2cInit();
   eepromInit();
   ws2812Init();
-  keysInit();
+  /* keysInit(cfg) 는 QMK matrix_init() 가 보드 핀맵으로 호출한다 (port/matrix.c). */
   usbInit();
 
   return true;

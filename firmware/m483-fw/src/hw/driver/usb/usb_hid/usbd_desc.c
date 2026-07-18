@@ -1,9 +1,10 @@
 /*
  * usbd_desc.c
  *
- *  HSUSBD HID keyboard descriptor set (single boot-keyboard interface).
- *  Nuvoton BSP HSUSBD_HID_MouseKeyboard/descriptors.c 를 키보드 단일 인터페이스로 축약,
- *  bInterval 을 8K(High-Speed 125us) 기준인 1 로 설정.
+ *  HSUSBD HID 복합장치 디스크립터 (QMK 네이티브 3-인터페이스).
+ *   IF0 Keyboard(boot 6KRO)  : HID_KeyboardReportDescriptor  -> EPA IN
+ *   IF1 Raw/VIA(0xFF60)       : HID_RawReportDescriptor       -> EPB IN / EPC OUT
+ *   IF2 Shared(NKRO/sys/cons) : HID_SharedReportDescriptor    -> EPD IN
  */
 
 #include "usbd_desc.h"
@@ -11,40 +12,116 @@
 #ifdef _USE_HW_USB
 
 
-/*!< USB HID Keyboard Report Descriptor (standard 8-byte boot keyboard) */
+/*!< IF0: 표준 8바이트 boot 키보드 (report-id 없음) */
 uint8_t HID_KeyboardReportDescriptor[] __attribute__((aligned(4))) =
 {
-    0x05, 0x01,     /* Usage Page(Generic Desktop Controls) */
+    0x05, 0x01,     /* Usage Page(Generic Desktop) */
     0x09, 0x06,     /* Usage(Keyboard) */
     0xA1, 0x01,     /* Collection(Application) */
     0x05, 0x07,         /* Usage Page(Keyboard/Keypad) */
     0x19, 0xE0,         /* Usage Minimum(0xE0) */
     0x29, 0xE7,         /* Usage Maximum(0xE7) */
-    0x15, 0x00,         /* Logical Minimum(0x0) */
-    0x25, 0x01,         /* Logical Maximum(0x1) */
-    0x75, 0x01,         /* Report Size(0x1) */
-    0x95, 0x08,         /* Report Count(0x8) */
-    0x81, 0x02,         /* Input (Data) => Modifier byte */
-    0x95, 0x01,         /* Report Count(0x1) */
-    0x75, 0x08,         /* Report Size(0x8) */
-    0x81, 0x01,         /* Input (Constant) => Reserved byte */
-    0x95, 0x05,         /* Report Count(0x5) */
-    0x75, 0x01,         /* Report Size(0x1) */
+    0x15, 0x00,
+    0x25, 0x01,
+    0x75, 0x01,         /* Report Size(1) */
+    0x95, 0x08,         /* Report Count(8) */
+    0x81, 0x02,         /* Input(Data,Var,Abs) => Modifier byte */
+    0x95, 0x01,
+    0x75, 0x08,
+    0x81, 0x01,         /* Input(Constant) => Reserved byte */
+    0x95, 0x05,
+    0x75, 0x01,
     0x05, 0x08,         /* Usage Page(LEDs) */
-    0x19, 0x01,         /* Usage Minimum(0x1) */
-    0x29, 0x05,         /* Usage Maximum(0x5) */
-    0x91, 0x02,         /* Output (Data) => LED report */
-    0x95, 0x01,         /* Report Count(0x1) */
-    0x75, 0x03,         /* Report Size(0x3) */
-    0x91, 0x01,         /* Output (Constant) => LED report padding */
-    0x95, 0x06,         /* Report Count(0x6) */
-    0x75, 0x08,         /* Report Size(0x8) */
-    0x15, 0x00,         /* Logical Minimum(0x0) */
-    0x25, 0x65,         /* Logical Maximum(0x65) */
-    0x05, 0x07,         /* Usage Page(Keyboard/Keypad) */
-    0x19, 0x00,         /* Usage Minimum(0x0) */
-    0x29, 0x65,         /* Usage Maximum(0x65) */
-    0x81, 0x00,         /* Input (Data) => keycode[6] */
+    0x19, 0x01,
+    0x29, 0x05,
+    0x91, 0x02,         /* Output(Data,Var,Abs) => LED report */
+    0x95, 0x01,
+    0x75, 0x03,
+    0x91, 0x01,         /* Output(Constant) => LED padding */
+    0x95, 0x06,
+    0x75, 0x08,
+    0x15, 0x00,
+    0x25, 0x65,
+    0x05, 0x07,
+    0x19, 0x00,
+    0x29, 0x65,
+    0x81, 0x00,         /* Input(Data,Array) => keycode[6] */
+    0xC0            /* End Collection */
+};
+
+/*!< IF1: Raw HID / VIA (Vendor 0xFF60, 32바이트 IN/OUT, report-id 없음) */
+uint8_t HID_RawReportDescriptor[] __attribute__((aligned(4))) =
+{
+    0x06, 0x60, 0xFF,   /* Usage Page(Vendor 0xFF60) */
+    0x09, 0x61,         /* Usage(0x61) */
+    0xA1, 0x01,         /* Collection(Application) */
+    0x09, 0x62,             /* Usage(0x62) : data to host */
+    0x15, 0x00,
+    0x26, 0xFF, 0x00,       /* Logical Maximum(255) */
+    0x95, VIA_REPORT_SIZE,  /* Report Count(32) */
+    0x75, 0x08,             /* Report Size(8) */
+    0x81, 0x02,             /* Input(Data,Var,Abs) */
+    0x09, 0x63,             /* Usage(0x63) : data from host */
+    0x15, 0x00,
+    0x26, 0xFF, 0x00,
+    0x95, VIA_REPORT_SIZE,
+    0x75, 0x08,
+    0x91, 0x02,             /* Output(Data,Var,Abs) */
+    0xC0            /* End Collection */
+};
+
+/*!< IF2: Shared - System Control(id3) + Consumer(id4) + NKRO(id6) */
+uint8_t HID_SharedReportDescriptor[] __attribute__((aligned(4))) =
+{
+    /* System Control (report id 3) */
+    0x05, 0x01,         /* Usage Page(Generic Desktop) */
+    0x09, 0x80,         /* Usage(System Control) */
+    0xA1, 0x01,         /* Collection(Application) */
+    0x85, 0x03,             /* Report ID(3) */
+    0x19, 0x01,             /* Usage Minimum(1) */
+    0x2A, 0xB7, 0x00,       /* Usage Maximum(0x00B7) */
+    0x15, 0x01,
+    0x26, 0xB7, 0x00,
+    0x95, 0x01,             /* Report Count(1) */
+    0x75, 0x10,             /* Report Size(16) */
+    0x81, 0x00,             /* Input(Data,Array) */
+    0xC0,               /* End Collection */
+
+    /* Consumer Control (report id 4) */
+    0x05, 0x0C,         /* Usage Page(Consumer) */
+    0x09, 0x01,         /* Usage(Consumer Control) */
+    0xA1, 0x01,         /* Collection(Application) */
+    0x85, 0x04,             /* Report ID(4) */
+    0x19, 0x01,
+    0x2A, 0xA0, 0x02,       /* Usage Maximum(0x02A0) */
+    0x15, 0x01,
+    0x26, 0xA0, 0x02,
+    0x95, 0x01,
+    0x75, 0x10,
+    0x81, 0x00,
+    0xC0,               /* End Collection */
+
+    /* NKRO Keyboard (report id 6) : mods(8) + bits(240) */
+    0x05, 0x01,         /* Usage Page(Generic Desktop) */
+    0x09, 0x06,         /* Usage(Keyboard) */
+    0xA1, 0x01,         /* Collection(Application) */
+    0x85, 0x06,             /* Report ID(6) */
+    0x05, 0x07,             /* Usage Page(Keyboard/Keypad) */
+    0x19, 0xE0,
+    0x29, 0xE7,
+    0x15, 0x00,
+    0x25, 0x01,
+    0x95, 0x08,             /* Report Count(8) */
+    0x75, 0x01,             /* Report Size(1) */
+    0x81, 0x02,             /* Input(Data,Var,Abs) => mods */
+    0x05, 0x07,
+    0x19, 0x00,
+    0x29, 0xEF,             /* Usage Maximum(239) */
+    0x15, 0x00,
+    0x25, 0x01,
+    0x95, 0xF0,             /* Report Count(240) */
+    0x75, 0x01,
+    0x81, 0x02,             /* Input(Data,Var,Abs) => key bits */
     0xC0            /* End Collection */
 };
 
@@ -55,11 +132,11 @@ uint8_t gu8DeviceDescriptor[] __attribute__((aligned(4))) =
 {
     LEN_DEVICE,     /* bLength */
     DESC_DEVICE,    /* bDescriptorType */
-    0x00, 0x02,     /* bcdUSB = 2.00 (high-speed capable) */
+    0x00, 0x02,     /* bcdUSB = 2.00 */
     0x00,           /* bDeviceClass */
     0x00,           /* bDeviceSubClass */
     0x00,           /* bDeviceProtocol */
-    CEP_MAX_PKT_SIZE,   /* bMaxPacketSize0 */
+    CEP_MAX_PKT_SIZE,
     USBD_VID & 0x00FF,
     ((USBD_VID & 0xFF00) >> 8),
     USBD_PID & 0x00FF,
@@ -71,210 +148,92 @@ uint8_t gu8DeviceDescriptor[] __attribute__((aligned(4))) =
     0x01            /* bNumConfigurations */
 };
 
-/*!< USB Qualifier Descriptor (required for a proper high-speed device) */
+/*!< USB Qualifier Descriptor */
 uint8_t gu8QualifierDescriptor[] __attribute__((aligned(4))) =
 {
-    LEN_QUALIFIER,  /* bLength */
-    DESC_QUALIFIER, /* bDescriptorType */
-    0x00, 0x02,     /* bcdUSB */
-    0x00,           /* bDeviceClass */
-    0x00,           /* bDeviceSubClass */
-    0x00,           /* bDeviceProtocol */
-    CEP_OTHER_MAX_PKT_SIZE, /* bMaxPacketSize0 */
-    0x01,           /* bNumConfigurations */
+    LEN_QUALIFIER,
+    DESC_QUALIFIER,
+    0x00, 0x02,
+    0x00,
+    0x00,
+    0x00,
+    CEP_OTHER_MAX_PKT_SIZE,
+    0x01,
     0x00
 };
 
-/*!< USB Configuration Descriptor (High-Speed) */
-uint8_t gu8ConfigDescriptor[] __attribute__((aligned(4))) =
-{
-    LEN_CONFIG,     /* bLength */
-    DESC_CONFIG,    /* bDescriptorType */
-    LEN_CONFIG_AND_SUBORDINATE & 0x00FF,
-    ((LEN_CONFIG_AND_SUBORDINATE & 0xFF00) >> 8),
-    0x01,           /* bNumInterfaces */
-    0x01,           /* bConfigurationValue */
-    0x00,           /* iConfiguration */
-    0x80 | (USBD_SELF_POWERED << 6) | (USBD_REMOTE_WAKEUP << 5),
-    USBD_MAX_POWER,
 
-    /* Interface descriptor: HID - Keyboard */
-    LEN_INTERFACE,  /* bLength */
-    DESC_INTERFACE, /* bDescriptorType */
-    0x00,           /* bInterfaceNumber */
-    0x00,           /* bAlternateSetting */
-    0x01,           /* bNumEndpoints */
-    0x03,           /* bInterfaceClass : HID */
-    0x01,           /* bInterfaceSubClass : boot */
-    HID_KEYBOARD,   /* bInterfaceProtocol */
-    0x00,           /* iInterface */
+/*
+ * Config descriptor 본문(3 인터페이스). HS/FS/OtherSpeed 4벌이 동일하고
+ * 첫 bDescriptorType(DESC_CONFIG vs DESC_OTHERSPEED)만 다르므로 매크로로 공유한다.
+ * 인터럽트 EP 는 payload<=64 라 FS 에서도 wMaxPacketSize 동일.
+ */
+#define HID_CONFIG_DESC(cfgType)                                                    \
+    LEN_CONFIG,     /* bLength */                                                   \
+    cfgType,        /* bDescriptorType */                                          \
+    LEN_CONFIG_AND_SUBORDINATE & 0x00FF,                                            \
+    ((LEN_CONFIG_AND_SUBORDINATE & 0xFF00) >> 8),                                   \
+    NUM_INTERFACES, /* bNumInterfaces */                                            \
+    0x01,           /* bConfigurationValue */                                       \
+    0x00,           /* iConfiguration */                                            \
+    0x80 | (USBD_SELF_POWERED << 6) | (USBD_REMOTE_WAKEUP << 5),                     \
+    USBD_MAX_POWER,                                                                  \
+                                                                                    \
+    /* ---- IF0 : HID Keyboard (boot) ---- */                                       \
+    LEN_INTERFACE, DESC_INTERFACE, IF_NUM_KBD, 0x00, 0x01,                          \
+    0x03, 0x01, HID_KEYBOARD, 0x00,                                                 \
+    LEN_HID, DESC_HID, 0x10, 0x01, 0x00, 0x01, DESC_HID_RPT,                        \
+    sizeof(HID_KeyboardReportDescriptor) & 0x00FF,                                  \
+    ((sizeof(HID_KeyboardReportDescriptor) & 0xFF00) >> 8),                         \
+    LEN_ENDPOINT, DESC_ENDPOINT, (INT_IN_EP_NUM_KB | EP_INPUT), EP_INT,             \
+    EPA_MAX_PKT_SIZE & 0x00FF, ((EPA_MAX_PKT_SIZE & 0xFF00) >> 8),                  \
+    HID_KBD_INT_IN_INTERVAL,                                                        \
+                                                                                    \
+    /* ---- IF1 : Raw/VIA (IN + OUT) ---- */                                        \
+    LEN_INTERFACE, DESC_INTERFACE, IF_NUM_VIA, 0x00, 0x02,                          \
+    0x03, 0x00, HID_NONE, 0x00,                                                     \
+    LEN_HID, DESC_HID, 0x10, 0x01, 0x00, 0x01, DESC_HID_RPT,                        \
+    sizeof(HID_RawReportDescriptor) & 0x00FF,                                       \
+    ((sizeof(HID_RawReportDescriptor) & 0xFF00) >> 8),                              \
+    LEN_ENDPOINT, DESC_ENDPOINT, (INT_IN_EP_NUM_VIA | EP_INPUT), EP_INT,            \
+    EPB_MAX_PKT_SIZE & 0x00FF, ((EPB_MAX_PKT_SIZE & 0xFF00) >> 8),                  \
+    HID_VIA_INT_INTERVAL,                                                           \
+    LEN_ENDPOINT, DESC_ENDPOINT, (OUT_EP_NUM_VIA | EP_OUTPUT), EP_INT,              \
+    EPC_MAX_PKT_SIZE & 0x00FF, ((EPC_MAX_PKT_SIZE & 0xFF00) >> 8),                  \
+    HID_VIA_INT_INTERVAL,                                                           \
+                                                                                    \
+    /* ---- IF2 : Shared (NKRO/system/consumer) ---- */                            \
+    LEN_INTERFACE, DESC_INTERFACE, IF_NUM_SHARED, 0x00, 0x01,                       \
+    0x03, 0x00, HID_NONE, 0x00,                                                     \
+    LEN_HID, DESC_HID, 0x10, 0x01, 0x00, 0x01, DESC_HID_RPT,                        \
+    sizeof(HID_SharedReportDescriptor) & 0x00FF,                                    \
+    ((sizeof(HID_SharedReportDescriptor) & 0xFF00) >> 8),                           \
+    LEN_ENDPOINT, DESC_ENDPOINT, (INT_IN_EP_NUM_SHARED | EP_INPUT), EP_INT,         \
+    EPD_MAX_PKT_SIZE & 0x00FF, ((EPD_MAX_PKT_SIZE & 0xFF00) >> 8),                  \
+    HID_SHARED_INT_IN_INTERVAL
 
-    /* HID descriptor */
-    LEN_HID,        /* bLength */
-    DESC_HID,       /* bDescriptorType */
-    0x10, 0x01,     /* bcdHID */
-    0x00,           /* bCountryCode */
-    0x01,           /* bNumDescriptors */
-    DESC_HID_RPT,   /* bDescriptorType (report) */
-    sizeof(HID_KeyboardReportDescriptor) & 0x00FF,
-    ((sizeof(HID_KeyboardReportDescriptor) & 0xFF00) >> 8),
-
-    /* Endpoint descriptor: interrupt IN */
-    LEN_ENDPOINT,   /* bLength */
-    DESC_ENDPOINT,  /* bDescriptorType */
-    (INT_IN_EP_NUM_KB | EP_INPUT),
-    EP_INT,
-    EPA_MAX_PKT_SIZE & 0x00FF,
-    ((EPA_MAX_PKT_SIZE & 0xFF00) >> 8),
-    HID_KBD_INT_IN_INTERVAL     /* bInterval = 1 => 8000 Hz (HS) */
-};
-
-/*!< USB Other-Speed Configuration Descriptor (reported while running High-Speed) */
-uint8_t gu8OtherConfigDescriptorHS[] __attribute__((aligned(4))) =
-{
-    LEN_CONFIG,
-    DESC_OTHERSPEED,
-    LEN_CONFIG_AND_SUBORDINATE & 0x00FF,
-    ((LEN_CONFIG_AND_SUBORDINATE & 0xFF00) >> 8),
-    0x01,
-    0x01,
-    0x00,
-    0x80 | (USBD_SELF_POWERED << 6) | (USBD_REMOTE_WAKEUP << 5),
-    USBD_MAX_POWER,
-
-    LEN_INTERFACE,
-    DESC_INTERFACE,
-    0x00,
-    0x00,
-    0x01,
-    0x03,
-    0x01,
-    HID_KEYBOARD,
-    0x00,
-
-    LEN_HID,
-    DESC_HID,
-    0x10, 0x01,
-    0x00,
-    0x01,
-    DESC_HID_RPT,
-    sizeof(HID_KeyboardReportDescriptor) & 0x00FF,
-    ((sizeof(HID_KeyboardReportDescriptor) & 0xFF00) >> 8),
-
-    LEN_ENDPOINT,
-    DESC_ENDPOINT,
-    (INT_IN_EP_NUM_KB | EP_INPUT),
-    EP_INT,
-    EPA_OTHER_MAX_PKT_SIZE & 0x00FF,
-    ((EPA_OTHER_MAX_PKT_SIZE & 0xFF00) >> 8),
-    HID_KBD_INT_IN_INTERVAL
-};
-
-/*!< USB Configuration Descriptor (Full-Speed) */
-uint8_t gu8ConfigDescriptorFS[] __attribute__((aligned(4))) =
-{
-    LEN_CONFIG,
-    DESC_CONFIG,
-    LEN_CONFIG_AND_SUBORDINATE & 0x00FF,
-    ((LEN_CONFIG_AND_SUBORDINATE & 0xFF00) >> 8),
-    0x01,
-    0x01,
-    0x00,
-    0x80 | (USBD_SELF_POWERED << 6) | (USBD_REMOTE_WAKEUP << 5),
-    USBD_MAX_POWER,
-
-    LEN_INTERFACE,
-    DESC_INTERFACE,
-    0x00,
-    0x00,
-    0x01,
-    0x03,
-    0x01,
-    HID_KEYBOARD,
-    0x00,
-
-    LEN_HID,
-    DESC_HID,
-    0x10, 0x01,
-    0x00,
-    0x01,
-    DESC_HID_RPT,
-    sizeof(HID_KeyboardReportDescriptor) & 0x00FF,
-    ((sizeof(HID_KeyboardReportDescriptor) & 0xFF00) >> 8),
-
-    LEN_ENDPOINT,
-    DESC_ENDPOINT,
-    (INT_IN_EP_NUM_KB | EP_INPUT),
-    EP_INT,
-    EPA_OTHER_MAX_PKT_SIZE & 0x00FF,
-    ((EPA_OTHER_MAX_PKT_SIZE & 0xFF00) >> 8),
-    HID_KBD_INT_IN_INTERVAL
-};
-
-/*!< USB Other-Speed Configuration Descriptor (reported while running Full-Speed) */
-uint8_t gu8OtherConfigDescriptorFS[] __attribute__((aligned(4))) =
-{
-    LEN_CONFIG,
-    DESC_OTHERSPEED,
-    LEN_CONFIG_AND_SUBORDINATE & 0x00FF,
-    ((LEN_CONFIG_AND_SUBORDINATE & 0xFF00) >> 8),
-    0x01,
-    0x01,
-    0x00,
-    0x80 | (USBD_SELF_POWERED << 6) | (USBD_REMOTE_WAKEUP << 5),
-    USBD_MAX_POWER,
-
-    LEN_INTERFACE,
-    DESC_INTERFACE,
-    0x00,
-    0x00,
-    0x01,
-    0x03,
-    0x01,
-    HID_KEYBOARD,
-    0x00,
-
-    LEN_HID,
-    DESC_HID,
-    0x10, 0x01,
-    0x00,
-    0x01,
-    DESC_HID_RPT,
-    sizeof(HID_KeyboardReportDescriptor) & 0x00FF,
-    ((sizeof(HID_KeyboardReportDescriptor) & 0xFF00) >> 8),
-
-    LEN_ENDPOINT,
-    DESC_ENDPOINT,
-    (INT_IN_EP_NUM_KB | EP_INPUT),
-    EP_INT,
-    EPA_MAX_PKT_SIZE & 0x00FF,
-    ((EPA_MAX_PKT_SIZE & 0xFF00) >> 8),
-    HID_KBD_INT_IN_INTERVAL
-};
+uint8_t gu8ConfigDescriptor[]        __attribute__((aligned(4))) = { HID_CONFIG_DESC(DESC_CONFIG) };
+uint8_t gu8OtherConfigDescriptorHS[] __attribute__((aligned(4))) = { HID_CONFIG_DESC(DESC_OTHERSPEED) };
+uint8_t gu8ConfigDescriptorFS[]      __attribute__((aligned(4))) = { HID_CONFIG_DESC(DESC_CONFIG) };
+uint8_t gu8OtherConfigDescriptorFS[] __attribute__((aligned(4))) = { HID_CONFIG_DESC(DESC_OTHERSPEED) };
 
 
-/*!< USB Language String Descriptor */
+/*!< String Descriptors */
 uint8_t gu8StringLang[4] __attribute__((aligned(4))) =
 {
-    4,
-    DESC_STRING,
-    0x09, 0x04
+    4, DESC_STRING, 0x09, 0x04
 };
 
-/*!< USB Vendor String Descriptor */
 uint8_t gu8VendorStringDesc[] __attribute__((aligned(4))) =
 {
-    16,
-    DESC_STRING,
+    16, DESC_STRING,
     'N', 0, 'u', 0, 'v', 0, 'o', 0, 't', 0, 'o', 0, 'n', 0
 };
 
-/*!< USB Product String Descriptor */
 uint8_t gu8ProductStringDesc[] __attribute__((aligned(4))) =
 {
-    22,
-    DESC_STRING,
-    'M', 0, '4', 0, '8', 0, '3', 0, ' ', 0, 'K', 0, 'e', 0, 'y', 0, 's', 0, ' ', 0
+    20, DESC_STRING,
+    'W', 0, 'I', 0, 'S', 0, 'H', 0, '4', 0, '5', 0, '-', 0, '8', 0, 'K', 0
 };
 
 uint8_t *gpu8UsbString[4] =
@@ -285,23 +244,28 @@ uint8_t *gpu8UsbString[4] =
     NULL
 };
 
-/* One HID interface (keyboard), NULL terminated */
-uint8_t *gu8UsbHidReport[2] =
+/* 인터페이스 순서와 동일하게 report 디스크립터 배열 (NULL 종단) */
+uint8_t *gu8UsbHidReport[NUM_INTERFACES + 1] =
 {
     HID_KeyboardReportDescriptor,
+    HID_RawReportDescriptor,
+    HID_SharedReportDescriptor,
     NULL
 };
 
-uint32_t gu32UsbHidReportLen[2] =
+uint32_t gu32UsbHidReportLen[NUM_INTERFACES + 1] =
 {
     sizeof(HID_KeyboardReportDescriptor),
+    sizeof(HID_RawReportDescriptor),
+    sizeof(HID_SharedReportDescriptor),
     0,
 };
 
-/* Offset of the HID descriptor inside the configuration descriptor */
-uint32_t gu32ConfigHidDescIdx[2] =
+uint32_t gu32ConfigHidDescIdx[NUM_INTERFACES + 1] =
 {
-    (LEN_CONFIG + LEN_INTERFACE),
+    CFG_HID_IDX_KBD,
+    CFG_HID_IDX_VIA,
+    CFG_HID_IDX_SHARED,
     0,
 };
 

@@ -48,8 +48,12 @@
 #define      HW_WS2812_MAX_CH       45     /* 실제 보드 LED 개수에 맞게 조정 */
 
 #define _USE_HW_KEYS
-#define      HW_KEYS_MATRIX_ROWS    4
-#define      HW_KEYS_MATRIX_COLS    12
+/* 정적 할당 상한. 실제 ROW/COL 개수·핀순서는 보드 config 가 keysInit(cfg) 로 주입한다.
+ * ROW=PA / COL=PB 단일 16비트 포트이므로 각 <= 16.                                   */
+#define      HW_KEYS_ROW_MAX        8
+#define      HW_KEYS_COL_MAX        16
+/* 6KRO boot 리포트의 keycode 슬롯 수 (report.h: KEYBOARD_REPORT_SIZE = +2). */
+#define      HW_KEYS_PRESS_MAX      6
 
 
 //-- USE CLI
