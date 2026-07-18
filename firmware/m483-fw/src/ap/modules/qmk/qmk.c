@@ -15,6 +15,7 @@
 #include "usbd_hid.h"
 #include "cli.h"
 #include "log.h"
+#include "prof.h"
 #ifdef DEBOUNCE_RUNTIME
 #include "debounce_cfg.h"
 #endif
@@ -48,6 +49,17 @@ static volatile uint32_t task_us_max  = 0;
 static volatile uint32_t task_us_sum  = 0;
 static volatile uint32_t task_us_cnt  = 0;
 
+/* 눌림 확정 스캔의 keyboard_task 시간 + matrix_scan 비중 -> pre 병목 분해 */
+extern volatile uint32_t mscan_us;
+extern volatile uint8_t  press_scan_flag;
+static volatile uint32_t act_us_last = 0;   /* 눌림 스캔 keyboard_task 전체 */
+static volatile uint32_t act_us_max  = 0;
+static volatile uint32_t act_us_sum  = 0;
+static volatile uint32_t act_us_cnt  = 0;
+static volatile uint32_t ms_us_last  = 0;   /* 그 중 matrix_scan 부분 */
+static volatile uint32_t ms_us_max   = 0;
+static volatile uint32_t ms_us_sum   = 0;
+
 
 /* QMK keyboard_init 이후 훅 : 런타임 설정을 eeconfig 에서 로드/적용 */
 void keyboard_post_init_user(void)
@@ -69,18 +81,22 @@ void keyboard_post_init_user(void)
 /* 키 이벤트 훅 : SOCD(상반키) 처리 + 꾹(터보) 카운트 */
 bool process_record_user(uint16_t keycode, keyrecord_t *record)
 {
+  uint32_t c0 = profNow();
 #ifdef KILL_SWITCH_ENABLE
   kill_switch_process(keycode, record);
 #endif
 #ifdef KKUK_ENABLE
   kkuk_process(keycode, record);
 #endif
+  profAdd(PROF_HOOK, "hook", profNow() - c0);
   return true;
 }
 
 
 bool qmkInit(void)
 {
+  profInit();
+
   eeprom_init();
   via_hid_init();
 
@@ -99,14 +115,34 @@ bool qmkInit(void)
 
 void qmkUpdate(void)
 {
+  press_scan_flag = 0;
+
+  uint32_t pc0 = profNow();
   uint32_t t0 = micros();
   keyboard_task();                 /* matrix_scan + action + (RGB 시) rgb_matrix_task */
   uint32_t dt = micros() - t0;
+  uint32_t kbd_cyc = profNow() - pc0;
 
   task_us_last = dt;
   if (dt > task_us_max) task_us_max = dt;
   task_us_sum += dt;
   task_us_cnt++;
+
+  /* 이 스캔에서 눌림이 확정됐으면(matrix_scan 마커) 전체시간 + matrix_scan 비중 기록.
+   * dt = matrix_scan(ms) + action_exec + send. ms 를 빼면 action+send 가 보인다. */
+  if (press_scan_flag)
+  {
+    act_us_last = dt;
+    if (dt > act_us_max) act_us_max = dt;
+    act_us_sum += dt;
+    act_us_cnt++;
+
+    ms_us_last = mscan_us;
+    if (mscan_us > ms_us_max) ms_us_max = mscan_us;
+    ms_us_sum += mscan_us;
+
+    profAdd(PROF_KBD_TASK, "kbd_task", kbd_cyc);   /* 변화 스캔의 keyboard_task 전체 */
+  }
 
 #ifdef KKUK_ENABLE
   kkuk_idle();     /* 꾹(터보) 리피트 상태머신 */
@@ -133,9 +169,23 @@ static void cliQmk(cli_args_t *args)
     ret = true;
   }
 
+  if (args->argc == 1 && args->isStr(0, "prof"))
+  {
+    profDump();   /* DWT 사이클 프로파일 (변화 스캔 기준) */
+    ret = true;
+  }
+
+  if (args->argc == 2 && args->isStr(0, "prof") && args->isStr(1, "reset"))
+  {
+    profReset();
+    cliPrintf("prof reset\n");
+    ret = true;
+  }
+
   if (ret == false)
   {
     cliPrintf("qmk clear eeprom\n");
+    cliPrintf("qmk prof [reset]\n");
   }
 }
 
@@ -150,10 +200,14 @@ static void cliRgb(cli_args_t *args)
 
   if (args->argc == 1 && args->isStr(0, "info"))
   {
-    uint32_t avg = task_us_cnt ? (task_us_sum / task_us_cnt) : 0;
+    uint32_t avg  = task_us_cnt ? (task_us_sum / task_us_cnt) : 0;
+    uint32_t aavg = act_us_cnt  ? (act_us_sum  / act_us_cnt)  : 0;
+    uint32_t msavg= act_us_cnt  ? (ms_us_sum   / act_us_cnt)  : 0;
 
     cliPrintf("keyboard_task : last %d us, avg %d us, max %d us  (n=%d)\n",
               (int)task_us_last, (int)avg, (int)task_us_max, (int)task_us_cnt);
+    cliPrintf("  press scan  : total avg %d (max %d) = matrix %d + action/send %d us  (n=%d)\n",
+              (int)aavg, (int)act_us_max, (int)msavg, (int)(aavg - msavg), (int)act_us_cnt);
 #ifdef RGB_MATRIX_ENABLE
     cliPrintf("rgb matrix    : %s, mode %d, val %d, leds %d\n",
               rgb_matrix_is_enabled() ? "ON" : "off",

@@ -16,6 +16,7 @@
 #include "report.h"
 #include "keycode_config.h"
 #include "usb_hid/usbd_hid.h"
+#include "prof.h"
 
 static uint8_t usb_keyboard_leds(void)
 {
@@ -24,13 +25,17 @@ static uint8_t usb_keyboard_leds(void)
 
 static void usb_send_keyboard(report_keyboard_t *report)
 {
+  uint32_t c0 = profNow();
   usbHidSendReport((uint8_t *)report, KEYBOARD_REPORT_SIZE);
+  profAdd(PROF_SEND, "send", profNow() - c0);
 }
 
 static void usb_send_nkro(report_nkro_t *report)
 {
 #ifdef NKRO_ENABLE
+  uint32_t c0 = profNow();
   usbHidSendReportNkro((uint8_t *)report, sizeof(report_nkro_t));
+  profAdd(PROF_SEND, "send", profNow() - c0);
 #else
   (void)report;
 #endif

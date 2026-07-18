@@ -359,8 +359,12 @@ void usbHidFlush(void)
     inflight_queue_us = r->queue_us;
     epa_ready = 0;
 
-    for (i = 0; i < HID_KBD_REPORT_SIZE; i++)
-      HSUSBD->EP[EPA].EPDAT_BYTE = r->data[i];
+    /* FIFO 워드(4B) write : data[] 는 4B 정렬. 8B -> 2회 (바이트 8회 대비 단축) */
+    {
+      const uint32_t *w = (const uint32_t *)(const void *)r->data;
+      for (i = 0; i < HID_KBD_REPORT_SIZE / 4; i++)
+        HSUSBD->EP[EPA].EPDAT = w[i];
+    }
     HSUSBD->EP[EPA].EPRSPCTL = HSUSBD_EP_RSPCTL_SHORTTXEN;
     HSUSBD_ENABLE_EP_INT(EPA, HSUSBD_EPINTEN_TXPKIEN_Msk);
 
@@ -376,8 +380,15 @@ void usbHidFlush(void)
     inflight_queue_us_d = r->queue_us;
     epd_ready = 0;
 
-    for (i = 0; i < r->length; i++)
-      HSUSBD->EP[EPD].EPDAT_BYTE = r->data[i];
+    /* FIFO 워드(4B) write + 나머지 바이트. NKRO 32B -> 8회 (바이트 32회 대비 단축) */
+    {
+      const uint32_t *w  = (const uint32_t *)(const void *)r->data;
+      uint16_t        nw = r->length >> 2;
+      for (i = 0; i < nw; i++)
+        HSUSBD->EP[EPD].EPDAT = w[i];
+      for (i = nw << 2; i < r->length; i++)
+        HSUSBD->EP[EPD].EPDAT_BYTE = r->data[i];
+    }
     HSUSBD->EP[EPD].EPRSPCTL = HSUSBD_EP_RSPCTL_SHORTTXEN;
     HSUSBD_ENABLE_EP_INT(EPD, HSUSBD_EPINTEN_TXPKIEN_Msk);
 

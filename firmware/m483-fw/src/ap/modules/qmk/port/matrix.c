@@ -19,6 +19,7 @@
 #include "keys.h"
 #include "bsp.h"
 #include "usbd_hid.h"
+#include "prof.h"
 #ifdef WEB_HID_CHECK
 #include "chattering.h"
 #endif
@@ -37,6 +38,10 @@ static const uint8_t col_pins[MATRIX_COLS] = KEY_COL_PINS;
 static matrix_row_t raw_matrix[MATRIX_ROWS];
 static matrix_row_t matrix[MATRIX_ROWS];
 static uint32_t     key_scan_time = 0;
+
+/* 레이턴시 프로파일링 : matrix_scan 전체 소요시간 + 눌림 확정 스캔 마커 */
+volatile uint32_t mscan_us   = 0;
+volatile uint8_t  press_scan_flag = 0;
 
 static void cliMatrix(cli_args_t *args);
 
@@ -78,6 +83,7 @@ uint8_t matrix_scan(void)
   matrix_row_t curr_matrix[MATRIX_ROWS] = {0};
   uint32_t     pre_time;
   bool         changed;
+  uint32_t     prof_c0 = profNow();
 
   /* 키별 raw 접점 시각 (디바운스 확정 시 최대 지연 T0 로 사용) */
   static uint32_t     key_raw_time[MATRIX_ROWS][MATRIX_COLS] = {{0}};
@@ -91,14 +97,19 @@ uint8_t matrix_scan(void)
 
   key_scan_time = micros() - pre_time;
 
-  /* raw 변화한 키별 접점 시각 기록 (raw_matrix 갱신 전에) */
+  /* raw 변화한 키별 접점 시각 기록 (raw_matrix 갱신 전에).
+   * 변한 비트만 순회(CTZ) -> 변화 없는 행/스캔은 0회. (전 48키 순회 제거)
+   * 동시에 any_change 로 변화 여부를 누적 -> 아래 memcmp 제거. */
+  matrix_row_t any_change = 0;
   for (uint8_t r = 0; r < MATRIX_ROWS; r++)
   {
-    matrix_row_t delta = curr_matrix[r] ^ raw_matrix[r];
-    for (uint8_t c = 0; c < MATRIX_COLS; c++)
+    matrix_row_t delta = (matrix_row_t)(curr_matrix[r] ^ raw_matrix[r]);
+    any_change |= delta;
+    while (delta)
     {
-      if (delta & ((matrix_row_t)1 << c))
-        key_raw_time[r][c] = pre_time;
+      uint8_t c = (uint8_t)__builtin_ctz(delta);
+      key_raw_time[r][c] = pre_time;
+      delta &= (matrix_row_t)(delta - 1);   /* 최하위 set 비트 제거 */
     }
   }
 
@@ -108,7 +119,7 @@ uint8_t matrix_scan(void)
     chattering_raw_scan(curr_matrix, raw_matrix, pre_time);
 #endif
 
-  changed = memcmp(raw_matrix, curr_matrix, sizeof(curr_matrix)) != 0;
+  changed = (any_change != 0);   /* memcmp 제거 : delta 루프에서 이미 계산 */
   if (changed)
     memcpy(raw_matrix, curr_matrix, sizeof(curr_matrix));
 
@@ -121,22 +132,27 @@ uint8_t matrix_scan(void)
 
     for (uint8_t r = 0; r < MATRIX_ROWS; r++)
     {
-      matrix_row_t press = matrix[r] & ~prev_cooked[r];
-      for (uint8_t c = 0; c < MATRIX_COLS; c++)
+      matrix_row_t press = matrix[r] & (matrix_row_t)~prev_cooked[r];
+      while (press)
       {
-        if (press & ((matrix_row_t)1 << c))
-        {
-          uint32_t kt = key_raw_time[r][c];
-          if (!found || (int32_t)(t0 - kt) > 0) { t0 = kt; found = true; }
-        }
+        uint8_t   c  = (uint8_t)__builtin_ctz(press);
+        uint32_t  kt = key_raw_time[r][c];
+        if (!found || (int32_t)(t0 - kt) > 0) { t0 = kt; found = true; }
+        press &= (matrix_row_t)(press - 1);
       }
       prev_cooked[r] = matrix[r];
     }
 
     if (found)
+    {
       usbHidSetPressTime(t0);   /* 접점 시각 -> 레이턴시 기준(디바운스 포함 총지연) */
+      press_scan_flag = 1;         /* 이 스캔에서 눌림 확정 -> 프로파일 마커 */
+    }
   }
 
+  mscan_us = micros() - pre_time;   /* matrix_scan 전체 소요시간 */
+  if (press_scan_flag)
+    profAdd(PROF_MATRIX, "matrix", profNow() - prof_c0);
   return (uint8_t)changed;
 }
 

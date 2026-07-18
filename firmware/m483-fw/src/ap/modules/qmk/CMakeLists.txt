@@ -44,6 +44,7 @@ set(QMK_SRC_FILES
   ${QMK_ROOT_PATH}/port/matrix.c
   ${QMK_ROOT_PATH}/port/via_hid.c
   ${QMK_ROOT_PATH}/port/driver_usb.c
+  ${QMK_ROOT_PATH}/port/prof.c
   ${QMK_ROOT_PATH}/port/protocol/host.c
   ${QMK_ROOT_PATH}/port/protocol/report.c
   ${QMK_ROOT_PATH}/port/platforms/eeprom.c

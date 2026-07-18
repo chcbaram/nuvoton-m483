@@ -146,7 +146,7 @@ target_compile_options(${EXECUTABLE} PRIVATE
 
   -Wall
   -g3
-  -Og
+  -O2
   )
 
 target_link_options(${EXECUTABLE} PRIVATE
