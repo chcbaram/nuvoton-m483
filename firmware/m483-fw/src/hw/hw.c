@@ -36,6 +36,7 @@ bool hwInit(void)
   buttonInit();
   i2cInit();
   eepromInit();
+  ws2812Init();
   usbInit();
 
   return true;

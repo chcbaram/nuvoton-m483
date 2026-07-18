@@ -44,6 +44,9 @@
 #define _USE_HW_EEPROM
 #define      EEPROM_CHIP_ZD24C128
 
+#define _USE_HW_WS2812
+#define      HW_WS2812_MAX_CH       45     /* 실제 보드 LED 개수에 맞게 조정 */
+
 
 //-- USE CLI
 //
@@ -51,6 +54,7 @@
 #define _USE_CLI_HW_RESET           1
 #define _USE_CLI_HW_I2C             1
 #define _USE_CLI_HW_EEPROM          1
+#define _USE_CLI_HW_WS2812          1
 
 
 #endif
