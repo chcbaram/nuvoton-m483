@@ -118,7 +118,22 @@ if (RGB_MATRIX_ENABLE)
   )
 endif()
 
-# 보드별 port/*.c (via_port.c 등)
+# 웹 대시보드 텔레메트리 (web_hid 0xB0 + 점검(채터링/USB) + layout_def)
+if (WEB_HID_ENABLE)
+  add_compile_definitions(WEB_HID_CHECK)   # 점검(채터링/USB헬스) 포함. 빼려면 이 줄만 제거.
+  # VIA JSON 의 KLE 레이아웃 -> keyboards/<board>/port/layout_def.c 자동 생성.
+  # 보드 port/*.c 글롭보다 먼저(configure 단계) 실행돼야 한다.
+  execute_process(
+    COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_layout.py --dir ${QMK_KEYBOARD_PATH}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  )
+  list(APPEND QMK_SRC_FILES
+    ${QMK_ROOT_PATH}/port/web_hid.c
+    ${QMK_ROOT_PATH}/port/chattering.c
+  )
+endif()
+
+# 보드별 port/*.c (via_port.c, layout_def.c 등)
 file(GLOB QMK_BOARD_PORT CONFIGURE_DEPENDS ${QMK_KEYBOARD_PATH}/port/*.c)
 list(APPEND QMK_SRC_FILES ${QMK_BOARD_PORT})
 

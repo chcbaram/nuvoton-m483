@@ -19,5 +19,9 @@ set(KKUK_ENABLE true)
 # RGB Matrix (per-key SK6812/WS2812). 백엔드 = driver/rgb_matrix_drivers.c -> ws2812.c
 set(RGB_MATRIX_ENABLE true)
 
+# 웹 대시보드 텔레메트리 (raw HID 0xB0): INFO/LATENCY/MATRIX/LAYOUT + 점검(채터링/USB헬스).
+# 점검은 평소 성능 영향 없음(웹에서 켤 때만 동작).
+set(WEB_HID_ENABLE true)
+
 #   HOLD_OKP : Hold On Other Key Press 를 VIA 에서 런타임 on/off (per-key 콜백)
 set(HOLD_OKP_RUNTIME true)

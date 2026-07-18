@@ -10,7 +10,10 @@
 
 #include "quantum.h"
 #include "usbd_hid.h"
+
+#ifdef WEB_HID_CHECK
 #include "chattering.h"
+#endif
 
 #ifdef DEBOUNCE_RUNTIME
 #include "debounce_runtime.h"
@@ -26,7 +29,11 @@
 #define VENOM_SUB_CHATTER      0x05
 #define VENOM_SUB_USB_HEALTH   0x06
 
+#ifdef WEB_HID_CHECK
 #define VENOM_API_VERSION      2   // 2: 점검(채터링/USB) 지원
+#else
+#define VENOM_API_VERSION      1   // 1: 점검 미지원(INFO/LATENCY/MATRIX/LAYOUT 만)
+#endif
 
 
 // 보드별 물리 레이아웃(바이너리). 생성 파일 keyboards/<board>/port/layout_def.c 가 override 한다.
@@ -116,6 +123,7 @@ static void venom_cmd_layout(uint8_t *data)
 }
 
 
+#ifdef WEB_HID_CHECK
 // data = [ 0xB0, 0x05, action, arg_lo, arg_hi, ... ]
 //   0 disable / 1 enable(window_ms=arg)+reset / 2 reset
 //   3 read(start key index=arg): data[3]=엔트리수, data[4..]=키당4B [count, dur_lo, dur_hi, dbl]
@@ -229,6 +237,7 @@ static void venom_cmd_usb_health(uint8_t *data)
 
   #undef VENOM_PUT16
 }
+#endif /* WEB_HID_CHECK */
 
 
 bool via_command_kb(uint8_t *data, uint8_t length)
@@ -246,8 +255,10 @@ bool via_command_kb(uint8_t *data, uint8_t length)
     case VENOM_SUB_LATENCY: venom_cmd_latency(data); break;
     case VENOM_SUB_MATRIX:  venom_cmd_matrix(data);  break;
     case VENOM_SUB_LAYOUT:  venom_cmd_layout(data);  break;
+#ifdef WEB_HID_CHECK
     case VENOM_SUB_CHATTER:    venom_cmd_chatter(data);    break;
     case VENOM_SUB_USB_HEALTH: venom_cmd_usb_health(data); break;
+#endif
     default: break;
   }
   return true;

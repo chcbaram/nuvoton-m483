@@ -77,6 +77,13 @@ static volatile uint32_t sof_win_ms   = 0;
 static volatile uint32_t reset_count   = 0;
 static volatile uint32_t suspend_count = 0;
 
+/* USB 링크 헬스 (SOF 순단 감지) */
+static volatile uint32_t sof_total       = 0;    /* 모노토닉 SOF 카운터 */
+static volatile uint32_t sof_stall_count = 0;
+static uint32_t          link_last_sof   = 0;
+static uint32_t          link_last_ms    = 0;
+static bool              link_sof_seen   = false;
+
 /* 키보드 인터페이스 프로토콜 (NKRO 가능 판정용). 기본 report protocol. */
 static volatile uint8_t  kbd_protocol = HID_REPORT_PROTOCOL;
 
@@ -471,6 +478,7 @@ void usbHidOnSof(void)
   }
   sof_last_us = now_us;
   sof_count++;
+  sof_total++;
 
   if (sof_win_ms == 0)
     sof_win_ms = now_ms;
@@ -542,6 +550,50 @@ bool usbHidSetPressTime(uint32_t time_us)
 {
   press_us = time_us;
   return true;
+}
+
+/*--------------------------------------------------------------------------*/
+/* USB 링크 헬스 (웹 USB 점검)                                              */
+/*--------------------------------------------------------------------------*/
+void usbHidGetLinkHealth(usb_link_health_t *p_info)
+{
+  if (p_info == NULL)
+    return;
+  p_info->reset_count     = reset_count;
+  p_info->suspend_count   = suspend_count;
+  p_info->sof_stall_count = sof_stall_count;
+  p_info->sof_rate        = rate_info.freq_hz;
+  p_info->uptime_s        = millis() / 1000;
+}
+
+void usbHidResetLinkHealth(void)
+{
+  reset_count     = 0;
+  suspend_count   = 0;
+  sof_stall_count = 0;
+}
+
+/* SOF 순단 감지 : 5ms 마다 SOF 카운터가 안 늘면(=버스 프레임 정지) stall 카운트. */
+void usbLinkFramePoll(void)
+{
+  uint32_t now;
+
+  if (g_hsusbd_Configured == 0)
+  {
+    link_sof_seen = false;
+    return;
+  }
+
+  now = millis();
+  if ((now - link_last_ms) < 5)
+    return;
+  link_last_ms = now;
+
+  if (link_sof_seen && (sof_total == link_last_sof))
+    sof_stall_count++;          /* 열거된 상태인데 5ms 동안 SOF 0개 -> 순단 */
+
+  link_last_sof = sof_total;
+  link_sof_seen = true;
 }
 
 __attribute__((weak)) void usbHidSetStatusLed(uint8_t led_bits)

@@ -50,6 +50,16 @@ typedef struct
 /* VIA raw-HID 수신 콜백 (OUT 완료 시, in-place 처리) */
 typedef void (*usb_hid_via_rx_func_t)(uint8_t *data, uint8_t length);
 
+/* USB 링크 헬스 (웹 대시보드 USB 점검용) */
+typedef struct
+{
+  uint32_t reset_count;      /* USB 버스 리셋(재열거) 횟수 */
+  uint32_t suspend_count;    /* USB 서스펜드 진입 횟수 */
+  uint32_t sof_stall_count;  /* SOF(버스 프레임) 정지 감지 횟수 */
+  uint32_t sof_rate;         /* 초당 수신 SOF 수 (HS ~8000) */
+  uint32_t uptime_s;         /* 부팅 이후 경과(초) - 리부트 감지용 */
+} usb_link_health_t;
+
 
 /* ---- class core (usbd_conf 의 IRQ/Open 에서 호출) ---- */
 void usbHidInit(void);          /* endpoint 구성 */
@@ -78,6 +88,11 @@ bool    usbHidIsReady(void);                                     /* 열거 완�
 bool usbHidGetRateInfo(usb_hid_rate_info_t *p_info);
 bool usbHidGetLatency(uint16_t *raw_us, uint16_t *pre_us, uint16_t *usb_us, uint32_t *seq);
 bool usbHidSetPressTime(uint32_t time_us);   /* 접점 시각 -> 레이턴시 기준 */
+
+/* USB 링크 헬스 (웹 USB 점검) */
+void usbHidGetLinkHealth(usb_link_health_t *p_info);
+void usbHidResetLinkHealth(void);
+void usbLinkFramePoll(void);   /* SOF 순단 감지 (메인루프에서 주기 호출) */
 
 /* 호스트 LED 콜백 (__weak, 필요 시 재정의) */
 void usbHidSetStatusLed(uint8_t led_bits);

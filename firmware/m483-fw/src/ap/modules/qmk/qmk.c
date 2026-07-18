@@ -31,6 +31,9 @@
 #include "rgb_matrix.h"
 #include "ws2812.h"
 #endif
+#ifdef WEB_HID_CHECK
+#include "chattering.h"
+#endif
 
 
 extern host_driver_t usb_driver;   /* port/driver_usb.c */
@@ -110,6 +113,10 @@ void qmkUpdate(void)
 #endif
 #ifdef RGB_MATRIX_ENABLE
   ws2812Poll();    /* busy 로 skip 된 RGB 프레임(특히 꺼짐 시 black) 재전송 보장 */
+#endif
+#ifdef WEB_HID_CHECK
+  chattering_task();     /* 채터링 점검 워치독(웹 명령 끊기면 자동 종료) */
+  usbLinkFramePoll();    /* USB SOF 순단 감지(전송 영향 없음) */
 #endif
   eeprom_task();
   usbHidFlush();   /* SOF/DataIn 이 멈춰도 큐가 비워지도록 하는 폴백 */

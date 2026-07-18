@@ -19,6 +19,9 @@
 #include "keys.h"
 #include "bsp.h"
 #include "usbd_hid.h"
+#ifdef WEB_HID_CHECK
+#include "chattering.h"
+#endif
 
 
 #ifndef KEY_ROW_PINS
@@ -98,6 +101,12 @@ uint8_t matrix_scan(void)
         key_raw_time[r][c] = pre_time;
     }
   }
+
+#ifdef WEB_HID_CHECK
+  /* 채터링 점검(웹에서 활성화 시에만) : raw 전이를 raw_matrix 갱신 전에 샘플링 */
+  if (chattering_is_enabled())
+    chattering_raw_scan(curr_matrix, raw_matrix, pre_time);
+#endif
 
   changed = memcmp(raw_matrix, curr_matrix, sizeof(curr_matrix)) != 0;
   if (changed)
