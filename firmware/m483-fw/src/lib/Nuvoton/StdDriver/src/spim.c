@@ -437,7 +437,7 @@ static int spim_wait_write_done(uint32_t u32NBit)
     uint32_t   count;
     int        ret = -1;
 
-    for (count = 0UL; count < SystemCoreClock/1000UL; count++)
+    for (count = 0UL; count < SystemCoreClock / 10UL; count++)
     {
         if (spim_is_write_done(u32NBit))
         {
@@ -664,11 +664,17 @@ void SPIM_SetQuadEnable(int isEn, uint32_t u32NBit)
         SPIM_DBGMSG("Status Register: 0x%x - 0x%x\n", dataBuf[0], dataBuf[1]);
         if (isEn)
         {
-            dataBuf[1] |= SR2_QE;
+            if (dataBuf[1] & SR2_QE)
+                return;
+            else
+                dataBuf[1] |= SR2_QE;
         }
         else
         {
-            dataBuf[1] &= ~SR2_QE;
+            if ((dataBuf[1] & SR2_QE) == 0)
+                return;
+            else
+                dataBuf[1] &= ~SR2_QE;
         }
 
         spim_set_write_enable(1, u32NBit);   /* Write Enable.    */
