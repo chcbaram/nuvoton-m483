@@ -15,6 +15,8 @@ extern "C" {
 #include "button.h"
 #include "reset.h"
 #include "usb.h"
+#include "i2c.h"
+#include "eeprom.h"
 
 bool hwInit(void);
 

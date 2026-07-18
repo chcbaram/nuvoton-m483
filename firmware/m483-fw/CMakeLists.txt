@@ -56,9 +56,21 @@ foreach(TMP_PATH ${SRC_FILES_RECURSE})
 endforeach(TMP_PATH)
 
 
-add_executable(${EXECUTABLE} 
+add_executable(${EXECUTABLE}
   ${SRC_FILES}
   ${SRC_FILES_RECURSE}
+)
+
+
+# 제조사(Nuvoton StdDriver) 라이브러리 소스는 경고 억제.
+# vendor 코드를 직접 수정하지 않으므로 BSP 재업데이트 후에도 유지되며,
+# 프로젝트 자체 코드(src/hw, src/ap ..)는 -Wall 린트를 그대로 유지한다.
+#
+file(GLOB_RECURSE NUVOTON_LIB_SRC CONFIGURE_DEPENDS
+  src/lib/Nuvoton/StdDriver/src/*.c
+)
+set_source_files_properties(${NUVOTON_LIB_SRC}
+  PROPERTIES COMPILE_OPTIONS "-w"
 )
 
 

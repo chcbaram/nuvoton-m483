@@ -34,6 +34,8 @@ bool hwInit(void)
 
   resetInit();
   buttonInit();
+  i2cInit();
+  eepromInit();
   usbInit();
 
   return true;

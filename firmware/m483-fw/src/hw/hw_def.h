@@ -38,11 +38,19 @@
 #define _USE_HW_USB
 #define      HW_USB_HID             1
 
+#define _USE_HW_I2C
+#define      HW_I2C_MAX_CH          1
+
+#define _USE_HW_EEPROM
+#define      EEPROM_CHIP_ZD24C128
+
 
 //-- USE CLI
 //
 #define _USE_CLI_HW_LED             1
 #define _USE_CLI_HW_RESET           1
+#define _USE_CLI_HW_I2C             1
+#define _USE_CLI_HW_EEPROM          1
 
 
 #endif
