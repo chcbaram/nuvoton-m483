@@ -41,8 +41,8 @@
 
 #define KEY_SCAN_FREQ_HZ    1000000
 #define KEY_DISCHARGE_DUTY  5                   /* COL 방전 시점 % */
-#define KEY_RELEASE_DUTY    25                  /* COL 릴리즈 시점 % */
-#define KEY_SAMPLE_DUTY     75                  /* COL 샘플 시점 % */
+#define KEY_RELEASE_DUTY    55                  /* COL 릴리즈 시점 % */
+#define KEY_SAMPLE_DUTY     95                  /* COL 샘플 시점 % */
 #define KEY_ACC_CNT         0                   /* 0 = 매 주기(1×). 1 은 2× */
 #define KEY_USE_DISCHARGE   1                   /* 1=능동방전 */
 #define KEY_USE_PULLDOWN    1                   /* 1=COL 내부 풀다운 병행(보험) */

@@ -18,6 +18,17 @@ if (NOT EXISTS "${QMK_KEYBOARD_PATH}/config.h")
 endif()
 message(STATUS "QMK KEYBOARD_PATH = ${KEYBOARD_PATH}")
 
+# 디바운스 타입: 보드 config.cmake 의 DEBOUNCE_TYPE.
+# 기본 asym_eager_defer_pk = make(누름) 즉시 등록(저지연) + break(뗌) DEBOUNCE ms 안정 확인
+# (hold 중 채터로 인한 연타 방지). 게이밍에 적합.
+if (EXISTS "${QMK_KEYBOARD_PATH}/config.cmake")
+  include("${QMK_KEYBOARD_PATH}/config.cmake")
+endif()
+if (NOT DEFINED DEBOUNCE_TYPE OR DEBOUNCE_TYPE STREQUAL "")
+  set(DEBOUNCE_TYPE asym_eager_defer_pk)
+endif()
+message(STATUS "QMK DEBOUNCE_TYPE = ${DEBOUNCE_TYPE}")
+
 # ---- 컴파일할 소스 (명시적 allow-list) ----
 set(QMK_SRC_FILES
   ${QMK_ROOT_PATH}/qmk.c
@@ -50,7 +61,7 @@ set(QMK_SRC_FILES
   ${QMK_ROOT_PATH}/quantum/keymap_introspection.c   # #include KEYMAP_C (keymap.c 직접 컴파일 안함)
   ${QMK_ROOT_PATH}/quantum/color.c
   ${QMK_ROOT_PATH}/quantum/mousekey.c
-  ${QMK_ROOT_PATH}/quantum/debounce/sym_eager_pk.c
+  ${QMK_ROOT_PATH}/quantum/debounce/${DEBOUNCE_TYPE}.c
   ${QMK_ROOT_PATH}/quantum/process_keycode/process_key_override.c
   ${QMK_ROOT_PATH}/quantum/process_keycode/process_grave_esc.c
   ${QMK_ROOT_PATH}/quantum/process_keycode/process_magic.c   # NK_TOGG / GU_TOGG(Win락)
