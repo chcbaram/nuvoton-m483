@@ -1,22 +1,26 @@
 /*
  * keys.c
  *
- *  키 매트릭스 스캐너 - EPWM1 accumulator + 순환 PDMA (CPU·인터럽트 0, 백그라운드 스캔).
+ *  키 매트릭스 스캐너 - EPWM1 4채널 accumulator + 순환 PDMA.
+ *  [실험] COL 능동 방전(open-drain) 버전. 문제 있으면 커밋 d09125d 로 되돌릴 것.
  *
- *  회로도(SCH_MCU / SCH_BARAM-45 PCB):
- *   - ROW0~3 = PA.0~3, COL0~8 = PB.15~PB.7, COL9~11 = PB.2/PB.1/PB.0.
- *   - LL4148 다이오드 anode->ROW. 선택 ROW=HIGH, COL=입력+내부 풀다운, 눌림 -> COL=1.
+ *  회로도: ROW0~3 = PA.0~3, COL0~8 = PB.15~PB.7, COL9~11 = PB.2/PB.1/PB.0.
+ *          LL4148 다이오드 anode->ROW.
  *
- *  방식 (blog: chcbaram "Nuvoton M483 고속 키스캔"):
- *   - EPWM1 한 카운터에서 두 채널의 accumulator 를 서로 다른 포인트로 PDMA 트리거.
- *     CH0 @ zero point (0%)     -> PDMA(W): row_pat[i] 를 PA->DOUT 에 쓰기 (행 선택)
- *     CH1 @ compare-up (75%)    -> PDMA(R): PB->PIN 을 col_raw[i] 로 읽기 (settle 후 열 샘플)
- *   - 두 PDMA 채널 모두 self-loop scatter-gather 로 4행을 무한 순환 -> CPU/인터럽트 없이
- *     매트릭스가 백그라운드로 계속 갱신됨. keysUpdate() 는 col_raw 를 디코드만 한다.
- *   - PA->DATMSK 로 PA.4~15(WS2812/I2C) 를 보호하고 PA.0~3 만 갱신.
- *   - WS2812 가 EPWM0/TMR3, PDMA ch0 을 쓰므로 매트릭스는 EPWM1, PDMA ch1/ch2 사용.
+ *  아이디어(사용자): COL 내부 풀다운은 방전(HIGH->LOW)이 느려 settle 병목.
+ *   COL 을 open-drain 출력으로 두고(그래도 PIN 으로 입력 레벨 읽힘),
+ *   매 주기 COL 을 '0'으로 강제 방전 후 '1'로 릴리즈하면 눌린 키만 ROW(HIGH)로
+ *   빠르게 충전됨 -> 약한 풀다운 방전 의존 제거 -> 고속화.
  *
- *  baram-qmk 의 keys API 미러링.
+ *  한 EPWM1 주기 = 한 행 스텝. 4채널 accumulator 를 서로 다른 포인트로 PDMA 트리거:
+ *   CH0 @ zero(0%)      -> PDMA: ROW 선택 패턴을 PA->DOUT
+ *   CH1 @ compare(5%)   -> PDMA: COL '0'(방전) 을 PB->DOUT  (ROW@0% 와 5% 분리)
+ *   CH2 @ compare(25%)  -> PDMA: COL '1'(릴리즈) 을 PB->DOUT
+ *   CH3 @ compare(75%)  -> PDMA: PB->PIN 읽기 -> col_raw (settle 후 샘플)
+ *  4채널 모두 self-loop scatter-gather 로 순환 -> CPU/인터럽트 0.
+ *  PA->DATMSK / PB->DATMSK 로 관련없는 비트 보호.
+ *
+ *  주: accumulator 는 IFACNT=0 이어야 매 주기(1×). WS2812=EPWM0/PDMA ch0 와 분리.
  */
 
 #include "keys.h"
@@ -26,29 +30,29 @@
 #include "cli.h"
 
 
-/* ROW 핀 = PA.0~3 */
+/* ROW 핀 = PA.0~3 (push-pull 출력) */
 #define KEY_ROW_PORT        PA
 #define KEY_ROW_MASK        (BIT0|BIT1|BIT2|BIT3)
-#define KEY_ROW_PROT_MASK   (0xFFF0)            /* DATMSK: PA.4~15 보호 (PA.0~3 만 쓰기) */
+#define KEY_ROW_PROT_MASK   (0xFFF0)            /* DATMSK: PA.4~15 보호 */
 
-/* COL 핀 = PB.0,1,2,7~15 */
+/* COL 핀 = PB.0,1,2,7~15 (open-drain 출력, PIN 으로 읽기) */
 #define KEY_COL_PORT        PB
 #define KEY_COL_MASK        (0xFF87)            /* PB.15~PB.7 + PB.2~PB.0 */
+#define KEY_COL_PROT_MASK   (0x0078)            /* DATMSK: PB.3~6(비COL) 보호 */
 
-/* EPWM / PDMA 자원 */
 #define KEY_EPWM            EPWM1
-#define KEY_PDMA_CH_W       1                   /* 행 쓰기 (EPWM1 CH0 accumulator) */
-#define KEY_PDMA_CH_R       2                   /* 열 읽기 (EPWM1 CH1 accumulator) */
 
-/* 스캔 스텝 주파수(=EPWM 주기). 100kHz -> 10us/스텝, 4행 -> 40us/스캔(25kHz). */
-#define KEY_SCAN_FREQ_HZ    200000
-#define KEY_SAMPLE_DUTY     75                  /* 열 샘플 시점 % (settle = 75%*주기) */
+/* PDMA 채널 (WS2812=ch0 사용중이라 ch1~4) */
+#define KEY_PDMA_CH_ROW     1                   /* EPWM1 CH0 @zero  : ROW 쓰기 */
+#define KEY_PDMA_CH_DIS     2                   /* EPWM1 CH1 @zero  : COL 방전 */
+#define KEY_PDMA_CH_REL     3                   /* EPWM1 CH2 @25%   : COL 릴리즈 */
+#define KEY_PDMA_CH_READ    4                   /* EPWM1 CH3 @75%   : COL 읽기 */
 
-/*
- * accumulator 트리거 카운트. 실측 확인: IFACNT=1 은 2주기마다 트리거(2×),
- * **IFACNT=0 이어야 매 주기(1×)**. (PDMA ack 핸드셰이크가 1주기 추가되기 때문)
- */
-#define KEY_ACC_CNT         0
+#define KEY_SCAN_FREQ_HZ    500000
+#define KEY_DISCHARGE_DUTY  5                   /* COL 방전 시점 % (ROW@0% 와 분리 마진) */
+#define KEY_RELEASE_DUTY    25                  /* COL 릴리즈 시점 % */
+#define KEY_SAMPLE_DUTY     75                  /* COL 샘플 시점 % */
+#define KEY_ACC_CNT         0                   /* 0 = 매 주기(1×). 1 은 2× */
 
 
 typedef struct
@@ -78,33 +82,46 @@ static const uint8_t row_bit[MATRIX_ROWS] =
 };
 
 static bool     is_init = false;
-static uint16_t matrix[MATRIX_ROWS];                        /* matrix[row] bit c = COL c 눌림 */
+static uint16_t matrix[MATRIX_ROWS];
 
-static volatile uint32_t row_pat[MATRIX_ROWS];              /* 행 선택 패턴 (PA->DOUT 로 전송) */
+static volatile uint32_t row_pat[MATRIX_ROWS];              /* 행 선택 패턴 -> PA->DOUT */
 static volatile uint32_t col_raw[MATRIX_ROWS];              /* PB->PIN 캡처 (행별) */
+static volatile uint32_t col_dis_val = 0;                   /* COL 방전값(=0) */
+static volatile uint32_t col_rel_val = KEY_COL_MASK;        /* COL 릴리즈값(col 비트 1) */
 
-static __attribute__((aligned(4))) dma_desc_t desc_w;       /* 행 쓰기 SG (self-loop) */
-static __attribute__((aligned(4))) dma_desc_t desc_r;       /* 열 읽기 SG (self-loop) */
+static __attribute__((aligned(4))) dma_desc_t desc_row;
+static __attribute__((aligned(4))) dma_desc_t desc_dis;
+static __attribute__((aligned(4))) dma_desc_t desc_rel;
+static __attribute__((aligned(4))) dma_desc_t desc_read;
 
-static volatile uint32_t scan_cnt = 0;                      /* 완료된 스캔 횟수 (측정 중에만 갱신) */
+static volatile uint32_t scan_cnt = 0;                      /* 스캔 횟수 (측정 중에만 갱신) */
 
 
-/*
- * 읽기 채널 SG 테이블 완료마다 1회 -> 스캔 횟수 카운트.
- * 평소엔 desc_r 의 테이블 인터럽트가 꺼져 있어 호출되지 않고, 'keys rate' 실행 중에만 활성.
- */
+/* 읽기 채널 테이블 완료마다 1회 -> 스캔 횟수 카운트 ('keys rate' 실행 중에만 활성) */
 void PDMA_IRQHandler(void)
 {
   uint32_t status = PDMA_GET_INT_STATUS(PDMA);
 
   if (status & PDMA_INTSTS_TDIF_Msk)
   {
-    if (PDMA_GET_TD_STS(PDMA) & (1UL << KEY_PDMA_CH_R))
+    if (PDMA_GET_TD_STS(PDMA) & (1UL << KEY_PDMA_CH_READ))
     {
       scan_cnt++;
-      PDMA_CLR_TD_FLAG(PDMA, (1UL << KEY_PDMA_CH_R));
+      PDMA_CLR_TD_FLAG(PDMA, (1UL << KEY_PDMA_CH_READ));
     }
   }
+}
+
+
+static void keySetDesc(dma_desc_t *p_desc, uint32_t ctl_dir, uint32_t cnt,
+                       uint32_t src, uint32_t dest)
+{
+  p_desc->ctl = ((cnt - 1) << PDMA_DSCT_CTL_TXCNT_Pos) |
+                PDMA_WIDTH_32 | ctl_dir |
+                PDMA_REQ_SINGLE | PDMA_TBINTDIS_DISABLE | PDMA_OP_SCATTER;
+  p_desc->src    = src;
+  p_desc->dest   = dest;
+  p_desc->offset = (uint32_t)p_desc - (PDMA->SCATBA);        /* self-loop */
 }
 
 
@@ -114,7 +131,7 @@ bool keysInit(void)
   {
     matrix[i]  = 0;
     col_raw[i] = 0;
-    row_pat[i] = (1UL << row_bit[i]);                       /* 선택 행만 HIGH */
+    row_pat[i] = (1UL << row_bit[i]);
   }
 
   /* ---- clock ---- */
@@ -125,49 +142,51 @@ bool keysInit(void)
   SYS_LockReg();
 
   /* ---- GPIO ---- */
-  /* ROW : 출력, 초기 LOW, PA.4~15 는 DATMSK 로 보호(PDMA 가 PA.0~3 만 갱신) */
+  /* ROW : push-pull 출력, LOW, PA.4~15 보호 */
   GPIO_SetMode(KEY_ROW_PORT, KEY_ROW_MASK, GPIO_MODE_OUTPUT);
   KEY_ROW_PORT->DOUT &= ~KEY_ROW_MASK;
   GPIO_ENABLE_DOUT_MASK(KEY_ROW_PORT, KEY_ROW_PROT_MASK);
 
-  /* COL : 입력 + 내부 풀다운 */
-  GPIO_SetMode(KEY_COL_PORT, KEY_COL_MASK, GPIO_MODE_INPUT);
-  GPIO_SetPullCtl(KEY_COL_PORT, KEY_COL_MASK, GPIO_PUSEL_PULL_DOWN);
+  /* COL : open-drain 출력, 유휴 릴리즈(1), 비COL 비트 보호 */
+  GPIO_SetMode(KEY_COL_PORT, KEY_COL_MASK, GPIO_MODE_OPEN_DRAIN);
+  KEY_COL_PORT->DOUT |= KEY_COL_MASK;
+  GPIO_ENABLE_DOUT_MASK(KEY_COL_PORT, KEY_COL_PROT_MASK);
 
-  /* ---- EPWM1 : CH0/CH1 동일 주기, CH1 CMR = 75% ---- */
+  /* ---- EPWM1 : 4채널 동일 주기, CH2=25% / CH3=75% compare ---- */
   EPWM_ConfigOutputChannel(KEY_EPWM, 0, KEY_SCAN_FREQ_HZ, 50);
-  EPWM_ConfigOutputChannel(KEY_EPWM, 1, KEY_SCAN_FREQ_HZ, KEY_SAMPLE_DUTY);
+  EPWM_ConfigOutputChannel(KEY_EPWM, 1, KEY_SCAN_FREQ_HZ, KEY_DISCHARGE_DUTY);
+  EPWM_ConfigOutputChannel(KEY_EPWM, 2, KEY_SCAN_FREQ_HZ, KEY_RELEASE_DUTY);
+  EPWM_ConfigOutputChannel(KEY_EPWM, 3, KEY_SCAN_FREQ_HZ, KEY_SAMPLE_DUTY);
 
-  /* accumulator : CH0=zero(0%) -> PDMA(W), CH1=compare-up(75%) -> PDMA(R) */
   EPWM_EnableAcc(KEY_EPWM, 0, KEY_ACC_CNT, EPWM_IFA_ZERO_POINT);
-  EPWM_EnableAccPDMA(KEY_EPWM, 0);
   EPWM_EnableAcc(KEY_EPWM, 1, KEY_ACC_CNT, EPWM_IFA_COMPARE_UP_COUNT_POINT);
+  EPWM_EnableAcc(KEY_EPWM, 2, KEY_ACC_CNT, EPWM_IFA_COMPARE_UP_COUNT_POINT);
+  EPWM_EnableAcc(KEY_EPWM, 3, KEY_ACC_CNT, EPWM_IFA_COMPARE_UP_COUNT_POINT);
+  EPWM_EnableAccPDMA(KEY_EPWM, 0);
   EPWM_EnableAccPDMA(KEY_EPWM, 1);
+  EPWM_EnableAccPDMA(KEY_EPWM, 2);
+  EPWM_EnableAccPDMA(KEY_EPWM, 3);
 
-  /* ---- PDMA : 두 채널 self-loop scatter-gather (순환) ---- */
-  PDMA_Open(PDMA, (1UL << KEY_PDMA_CH_W) | (1UL << KEY_PDMA_CH_R));
+  /* ---- PDMA : 4채널 self-loop scatter-gather ---- */
+  PDMA_Open(PDMA, (1UL << KEY_PDMA_CH_ROW) | (1UL << KEY_PDMA_CH_DIS) |
+                  (1UL << KEY_PDMA_CH_REL) | (1UL << KEY_PDMA_CH_READ));
 
-  /* W: row_pat[] -> PA->DOUT, 4행 순환 */
-  desc_w.ctl = ((MATRIX_ROWS - 1) << PDMA_DSCT_CTL_TXCNT_Pos) |
-               PDMA_WIDTH_32 | PDMA_SAR_INC | PDMA_DAR_FIX |
-               PDMA_REQ_SINGLE | PDMA_TBINTDIS_DISABLE | PDMA_OP_SCATTER;
-  desc_w.src    = (uint32_t)row_pat;
-  desc_w.dest   = (uint32_t)&KEY_ROW_PORT->DOUT;
-  desc_w.offset = (uint32_t)&desc_w - (PDMA->SCATBA);        /* self-loop */
+  keySetDesc(&desc_row,  PDMA_SAR_INC | PDMA_DAR_FIX, MATRIX_ROWS,
+             (uint32_t)row_pat,           (uint32_t)&KEY_ROW_PORT->DOUT);
+  keySetDesc(&desc_dis,  PDMA_SAR_FIX | PDMA_DAR_FIX, 1,
+             (uint32_t)&col_dis_val,      (uint32_t)&KEY_COL_PORT->DOUT);
+  keySetDesc(&desc_rel,  PDMA_SAR_FIX | PDMA_DAR_FIX, 1,
+             (uint32_t)&col_rel_val,      (uint32_t)&KEY_COL_PORT->DOUT);
+  keySetDesc(&desc_read, PDMA_SAR_FIX | PDMA_DAR_INC, MATRIX_ROWS,
+             (uint32_t)&KEY_COL_PORT->PIN, (uint32_t)col_raw);
 
-  /* R: PB->PIN -> col_raw[], 4행 순환 (인터럽트 없음, TD 폴링도 불필요) */
-  desc_r.ctl = ((MATRIX_ROWS - 1) << PDMA_DSCT_CTL_TXCNT_Pos) |
-               PDMA_WIDTH_32 | PDMA_SAR_FIX | PDMA_DAR_INC |
-               PDMA_REQ_SINGLE | PDMA_TBINTDIS_DISABLE | PDMA_OP_SCATTER;
-  desc_r.src    = (uint32_t)&KEY_COL_PORT->PIN;
-  desc_r.dest   = (uint32_t)col_raw;
-  desc_r.offset = (uint32_t)&desc_r - (PDMA->SCATBA);        /* self-loop */
+  PDMA_SetTransferMode(PDMA, KEY_PDMA_CH_ROW,  PDMA_EPWM1_CH0_TX, TRUE, (uint32_t)&desc_row);
+  PDMA_SetTransferMode(PDMA, KEY_PDMA_CH_DIS,  PDMA_EPWM1_CH1_TX, TRUE, (uint32_t)&desc_dis);
+  PDMA_SetTransferMode(PDMA, KEY_PDMA_CH_REL,  PDMA_EPWM1_CH2_TX, TRUE, (uint32_t)&desc_rel);
+  PDMA_SetTransferMode(PDMA, KEY_PDMA_CH_READ, PDMA_EPWM1_CH3_TX, TRUE, (uint32_t)&desc_read);
 
-  PDMA_SetTransferMode(PDMA, KEY_PDMA_CH_W, PDMA_EPWM1_CH0_TX, TRUE, (uint32_t)&desc_w);
-  PDMA_SetTransferMode(PDMA, KEY_PDMA_CH_R, PDMA_EPWM1_CH1_TX, TRUE, (uint32_t)&desc_r);
-
-  /* ---- 스캔 시작 (두 채널 동시 -> 같은 카운터 위상) ---- */
-  EPWM_Start(KEY_EPWM, EPWM_CH_0_MASK | EPWM_CH_1_MASK);
+  /* ---- 스캔 시작 (4채널 동시 -> 같은 위상) ---- */
+  EPWM_Start(KEY_EPWM, EPWM_CH_0_MASK | EPWM_CH_1_MASK | EPWM_CH_2_MASK | EPWM_CH_3_MASK);
 
   is_init = true;
 
@@ -185,7 +204,6 @@ bool keysIsBusy(void)
 
 bool keysUpdate(void)
 {
-  /* 스캔은 PDMA 가 백그라운드로 계속 수행. 여기서는 최신 캡처를 디코드만 한다. */
   if (is_init == false)
     return false;
 
@@ -196,7 +214,7 @@ bool keysUpdate(void)
 
     for (int c = 0; c < MATRIX_COLS; c++)
     {
-      if (pb & (1UL << col_bit[c]))
+      if (pb & (1UL << col_bit[c]))          /* 눌림 -> 해당 COL HIGH */
         cols |= (1UL << c);
     }
     matrix[r] = cols;
@@ -258,10 +276,10 @@ static void cliKeys(cli_args_t *args)
 
   if (args->argc == 1 && args->isStr(0, "rate"))
   {
-    /* 측정 시작 : 읽기채널 테이블 인터럽트 ON (self-loop 다음 reload 부터 반영) */
-    desc_r.ctl &= ~PDMA_DSCT_CTL_TBINTDIS_Msk;
-    PDMA_CLR_TD_FLAG(PDMA, (1UL << KEY_PDMA_CH_R));
-    PDMA_EnableInt(PDMA, KEY_PDMA_CH_R, PDMA_INT_TRANS_DONE);
+    /* 측정 시작 : 읽기채널 테이블 인터럽트 ON */
+    desc_read.ctl &= ~PDMA_DSCT_CTL_TBINTDIS_Msk;
+    PDMA_CLR_TD_FLAG(PDMA, (1UL << KEY_PDMA_CH_READ));
+    PDMA_EnableInt(PDMA, KEY_PDMA_CH_READ, PDMA_INT_TRANS_DONE);
     NVIC_EnableIRQ(PDMA_IRQn);
 
     cliPrintf("scan rate 측정 (Ctrl-C 종료)\n");
@@ -274,17 +292,17 @@ static void cliKeys(cli_args_t *args)
       uint32_t ms    = millis() - m0;
 
       uint32_t scan_hz = (ms > 0) ? (scans * 1000UL / ms) : 0;
-      uint32_t step_hz = scan_hz * MATRIX_ROWS;    /* 스텝(행)당 실제 트리거 주파수 */
+      uint32_t step_hz = scan_hz * MATRIX_ROWS;
 
       cliPrintf("scan %d Hz, step %d Hz (set %d Hz) -> %s\n",
                 (int)scan_hz, (int)step_hz, (int)KEY_SCAN_FREQ_HZ,
                 (step_hz > (uint32_t)(KEY_SCAN_FREQ_HZ * 3 / 4)) ? "1x(normal)" : "2x?");
     }
 
-    /* 측정 종료 : 인터럽트 OFF 로 원복 (평소 인터럽트 0) */
+    /* 측정 종료 : 인터럽트 OFF 원복 */
     NVIC_DisableIRQ(PDMA_IRQn);
-    PDMA_DisableInt(PDMA, KEY_PDMA_CH_R, PDMA_INT_TRANS_DONE);
-    desc_r.ctl |= PDMA_DSCT_CTL_TBINTDIS_Msk;
+    PDMA_DisableInt(PDMA, KEY_PDMA_CH_READ, PDMA_INT_TRANS_DONE);
+    desc_read.ctl |= PDMA_DSCT_CTL_TBINTDIS_Msk;
     ret = true;
   }
 
