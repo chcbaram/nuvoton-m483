@@ -63,6 +63,15 @@ void mscSetWriteCb(msc_write_cb_t cb)
   g_msc_write_cb = cb;
 }
 
+/* 호스트의 "안전하게 제거(꺼내기)" 래치. START STOP UNIT(0x1B)에 LOEJ 비트가
+ * 실려 오면 set. 메인루프(ap.c)가 CSW 전송 후 이를 보고 부트 종료를 결정. */
+static volatile uint8_t g_msc_eject = 0;
+
+bool mscEjectRequested(void)
+{
+  return g_msc_eject != 0;
+}
+
 /*--------------------------------------------------------------------------*/
 /* Inquiry / mode-sense tables                                               */
 /*--------------------------------------------------------------------------*/
@@ -654,8 +663,27 @@ void mscProcess(void)
       MSC_AckCmd();
       break;
 
-    case UFI_VERIFY_10:
     case UFI_START_STOP:
+      /* START STOP UNIT (CDB byte4 = au8Data[2]) : bit1=LOEJ, bit0=START.
+       * 호스트가 장치 사용을 마치면 STOP(START=0)을 보낸다 -> 부트 종료(앱 점프) 신호:
+       *   - macOS 꺼내기      : byte4=0x00 (LOEJ=0, START=0)
+       *   - Windows 안전제거   : byte4=0x02 (LOEJ=1, START=0)
+       * 마운트 시의 LOAD(START=1)는 무시. 래치만 걸고 정상 ACK -> CSW 전송 후
+       * 메인루프가 bootJumpFirm(). */
+      logPrintf("SCSI START_STOP: byte4=0x%02X (LOEJ=%d START=%d)\r\n",
+                g_sCBW.au8Data[2],
+                (g_sCBW.au8Data[2] >> 1) & 1, g_sCBW.au8Data[2] & 1);
+      if (!(g_sCBW.au8Data[2] & 0x01))   /* START=0 : stop/eject */
+      {
+        g_msc_eject = 1;
+        logPrintf("SCSI START_STOP: stop/eject latched\r\n");
+      }
+      g_sCSW.dCSWDataResidue = 0;
+      g_sCSW.bCSWStatus      = 0;
+      MSC_AckCmd();
+      break;
+
+    case UFI_VERIFY_10:
     case UFI_TEST_UNIT_READY:
       g_sCSW.dCSWDataResidue = 0;
       g_sCSW.bCSWStatus      = 0;

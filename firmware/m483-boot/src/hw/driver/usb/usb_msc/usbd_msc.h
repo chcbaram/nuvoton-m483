@@ -140,6 +140,10 @@ extern uint8_t          g_u8BulkState;     /* BOT state (BULK_CBW only)        *
 typedef int (*msc_write_cb_t)(uint32_t lba, uint8_t *data);
 void mscSetWriteCb(msc_write_cb_t cb);
 
+/* 호스트가 "안전하게 제거(꺼내기)"(START STOP UNIT + LOEJ)를 보냈으면 true.
+ * 한 번 set되면 유지된다(리셋으로만 클리어). ap.c 메인루프에서 폴링. */
+bool mscEjectRequested(void);
+
 /*---------------------------------------------------------------------------
  * Public API
  *-------------------------------------------------------------------------*/

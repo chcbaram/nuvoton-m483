@@ -31,6 +31,9 @@
 #define FLASH_ADDR_BOOT           0x00000000UL
 #define FLASH_SIZE_BOOT           0x0000C000UL
 #define FLASH_ADDR_FIRM           0x0000C000UL
+/* 앱 버전 구조체(firm_ver_t) 위치. m483-fw gcc_arm_boot.ld의 VER 영역(0xC400)과
+ * 반드시 일치해야 한다: VECTOR 0xC000(1K) | VER 0xC400(1K) | FLASH 0xC800. */
+#define FLASH_ADDR_VER            0x0000C400UL
 #define FLASH_APROM_END           0x00080000UL
 #define FLASH_SIZE_FIRM           (FLASH_APROM_END - FLASH_ADDR_FIRM)
 #define FLASH_PAGE_SIZE           0x1000UL

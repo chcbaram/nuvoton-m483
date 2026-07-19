@@ -1,17 +1,12 @@
 #include "ap.h"
 #include "uf2/uf2.h"
 #include "boot/boot.h"
+#include "usb_msc/usbd_msc.h"   
 
 
 static void bootUp(void);
+static int  uf2Write(uint32_t lba, uint8_t *data);
 
-
-/* WRITE10 섹터 콜백(usb layer -> uf2). UF2 블록이면 플래시, 아니면(FAT/메타) 무시. */
-static int apUf2Write(uint32_t lba, uint8_t *data)
-{
-  (void)lba;
-  return uf2_write_block(data);
-}
 
 void apInit(void)
 {
@@ -21,12 +16,15 @@ void apInit(void)
   logPrintf("Mode      : BOOT (UF2 MSC)\r\n");
   uf2Init();
   usbInit();
-  mscSetWriteCb(apUf2Write);
+  mscSetWriteCb(uf2Write);
 }
 
 void apMain(void)
 {
-  uint32_t pre_time = millis();
+  uint32_t pre_time    = millis();
+  bool     eject_armed = false;
+  bool     eject_done  = false;
+  uint32_t eject_ms    = 0;
 
   while (1)
   {
@@ -39,6 +37,23 @@ void apMain(void)
 
     usbUpdate();
     uf2Update();
+
+    /* 펌웨어 갱신 없이 USB 드라이브 "꺼내기" -> 부트 종료 후 앱 실행(baram/convex 참고).
+     * 플래싱 중이면 무시(uf2Update 완료 경로가 스스로 리셋). CSW가 호스트로 전송될
+     * 시간을 잠깐 준 뒤 bootJumpFirm() 직접 점프(부트키/조건 재평가 없이 앱으로). */
+    if (!eject_done && !eject_armed && mscEjectRequested() && !uf2IsBusy())
+    {
+      eject_armed = true;
+      eject_ms    = millis();
+      logPrintf("Eject     : exit boot -> jump app\r\n");
+    }
+    if (eject_armed && (millis() - eject_ms >= 100))
+    {
+      bootJumpFirm();     /* 유효하면 리턴 안 함(앱으로 분기) */
+      logPrintf("Eject     : app invalid -> stay boot\r\n");
+      eject_armed = false;
+      eject_done  = true; /* 무효 -> 재시도하지 않음(부트 잔류) */
+    }
   }
 }
 
@@ -88,4 +103,11 @@ static void bootUp(void)
     }
     logPrintf("App       : invalid -> stay\r\n");
   }
+}
+
+/* WRITE10 섹터 콜백(usb layer -> uf2). UF2 블록이면 플래시, 아니면(FAT/메타) 무시. */
+static int uf2Write(uint32_t lba, uint8_t *data)
+{
+  (void)lba;
+  return uf2_write_block(data);
 }

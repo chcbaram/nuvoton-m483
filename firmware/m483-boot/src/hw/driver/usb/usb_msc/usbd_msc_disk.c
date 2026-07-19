@@ -24,14 +24,39 @@ static void fat_label(uint8_t *out)
 
 static uint32_t build_info_txt(uint8_t *buf)
 {
+  /* 설치된 펌웨어가 .version 섹션(=FLASH_ADDR_VER, m483-fw)에 심어둔 이름/버전. */
+  const firm_ver_t *p_ver = (const firm_ver_t *)FLASH_ADDR_VER;
+  int total = 0;
   int len;
+
+  /* 부트로더 자신의 정보. */
   len = snprintf((char *)buf, VDISK_SECTOR_SIZE,
                  "%s UF2 Bootloader\r\n"
                  "Model : %s\r\n"
                  "Board-ID: %s\r\n"
-                 "Version : %s\r\n",
+                 "Version : %s\r\n\r\n",
                  UF2_PRODUCT_NAME, UF2_BOARD_ID, UF2_BOARD_ID, _DEF_FIRMWATRE_VERSION);
-  return (len > 0) ? (uint32_t)len : 0;
+  if (len > 0)
+    total = len;
+
+  /* 설치된 펌웨어 정보(없거나 무효면 (none)). %.31s로 필드 밖 참조 방지. */
+  if (p_ver->magic_number == VERSION_MAGIC_NUMBER)
+  {
+    len = snprintf((char *)buf + total, VDISK_SECTOR_SIZE - total,
+                   "Firmware:\r\n"
+                   "  Name : %.31s\r\n"
+                   "  Ver  : %.31s\r\n",
+                   p_ver->name_str, p_ver->version_str);
+  }
+  else
+  {
+    len = snprintf((char *)buf + total, VDISK_SECTOR_SIZE - total,
+                   "Firmware: (none)\r\n");
+  }
+  if (len > 0)
+    total += len;
+
+  return (uint32_t)total;
 }
 
 static void build_boot_sector(uint8_t *b)
