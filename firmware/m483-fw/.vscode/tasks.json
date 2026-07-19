@@ -5,10 +5,10 @@
       "label": "build-configure",
       "type": "shell",
       "osx":{
-        "command": "cmake -S . -B build-${input:board} -DKEYBOARD_PATH='/keyboards/baram/${input:board}'",
+        "command": "cmake -S . -B build -DKEYBOARD_PATH='/keyboards/baram/${input:board}'",
       },
       "windows":{
-        "command": "cmake -S . -B build-${input:board} -G 'MinGW Makefiles' -DKEYBOARD_PATH='/keyboards/baram/${input:board}'",
+        "command": "cmake -S . -B build -G 'MinGW Makefiles' -DKEYBOARD_PATH='/keyboards/baram/${input:board}'",
       },
       "problemMatcher": []
     },
@@ -16,10 +16,10 @@
       "label": "build-build",
       "type": "shell",
       "osx":{
-        "command": "cmake -S . -B build-${input:board} -DKEYBOARD_PATH='/keyboards/baram/${input:board}' && cmake --build build-${input:board} -j10",
+        "command": "cmake -S . -B build -DKEYBOARD_PATH='/keyboards/baram/${input:board}' && cmake --build build -j10",
       },
       "windows":{
-        "command": "cmake -S . -B build-${input:board} -G 'MinGW Makefiles' -DKEYBOARD_PATH='/keyboards/baram/${input:board}'; cmake --build build-${input:board} -j10",
+        "command": "cmake -S . -B build -G 'MinGW Makefiles' -DKEYBOARD_PATH='/keyboards/baram/${input:board}'; cmake --build build -j10",
       },
       "problemMatcher": [],
       "group": {
@@ -30,7 +30,7 @@
     {
       "label": "build-clean",
       "type": "shell",
-      "command": "cmake --build build-${input:board} --target clean",
+      "command": "cmake --build build --target clean",
       "problemMatcher": [],
     },
 
