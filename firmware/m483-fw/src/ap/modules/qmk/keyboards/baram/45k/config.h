@@ -34,6 +34,9 @@
 /* NKRO 는 VIA FEATURE>QMK 토글(id_qmk_nkro) 로 제어 - keymap_config.nkro 에 영구 저장.
  * (FORCE_NKRO 를 쓰면 부팅마다 강제 ON 되어 토글 OFF 가 안 남으므로 사용 안 함) */
 
+/* Grave Escape : QK_GESC 키코드(평소 ESC, Shift/GUI 시 grave). baram/VENOM 과 동일. */
+#define GRAVE_ESC_ENABLE
+
 
 /*----------------------------------------------------------------------------*/
 /* RGB Matrix (per-key SK6812/WS2812, 회로도상 45개 체인 = HW_WS2812_MAX_CH)    */
