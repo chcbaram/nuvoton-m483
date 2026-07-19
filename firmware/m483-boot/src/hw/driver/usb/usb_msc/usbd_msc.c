@@ -77,11 +77,12 @@ bool mscEjectRequested(void)
 /*--------------------------------------------------------------------------*/
 static uint8_t g_au8InquiryID[36] =
 {
-  0x00,                   /* Peripheral Device Type */
-  0x80,                   /* RMB */
-  0x00,                   /* ISO/ECMA, ANSI Version */
-  0x00,                   /* Response Data Format */
-  0x1F, 0x00, 0x00, 0x00, /* Additional Length */
+  0x00,                   /* Peripheral Device Type : direct-access block   */
+  0x80,                   /* RMB : removable                                */
+  0x02,                   /* Version : SCSI-2 (SPC) — 0 이면 macOS가 dumb 장치로
+                           * 취급해 START_STOP eject 핸드셰이크를 생략함        */
+  0x02,                   /* Response Data Format : 2 (표준 준수). TinyUSB 동일  */
+  0x1F, 0x00, 0x00, 0x00, /* Additional Length (31)                          */
   /* Vendor Identification (8) */
   'W', 'I', 'S', 'H', ' ', ' ', ' ', ' ',
   /* Product Identification (16) */
@@ -178,8 +179,9 @@ void mscInit(void)
   HSUSBD_SetEpBufAddr(CEP, CEP_BUF_BASE, CEP_BUF_LEN);
   HSUSBD_ENABLE_CEP_INT(HSUSBD_CEPINTEN_SETUPPKIEN_Msk | HSUSBD_CEPINTEN_STSDONEIEN_Msk);
 
-  /* Full-speed only (HISPDEN never set). */
-  mscInitForFullSpeed();
+  /* High-speed by default (HSUSBD_Start sets HISPDEN). The bus-reset handler
+   * re-inits EPs to the actual negotiated speed via OPER.CURSPD (mscOnBusReset). */
+  mscInitForHighSpeed();
 
   g_sCSW.dCSWSignature = CSW_SIGNATURE;
   g_TotalSectors       = VDISK_TOTAL_SECTORS;

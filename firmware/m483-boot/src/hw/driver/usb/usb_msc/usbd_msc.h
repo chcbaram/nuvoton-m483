@@ -30,9 +30,9 @@ extern "C" {
 /* Define EP maximum packet size (FS) */
 #define CEP_MAX_PKT_SIZE               64
 #define CEP_OTHER_MAX_PKT_SIZE         64
-#define EPA_MAX_PKT_SIZE               64      /* bulk-IN  FS */
+#define EPA_MAX_PKT_SIZE               512     /* bulk-IN  HS (other-speed FS=64) */
 #define EPA_OTHER_MAX_PKT_SIZE         64
-#define EPB_MAX_PKT_SIZE               64      /* bulk-OUT FS */
+#define EPB_MAX_PKT_SIZE               512     /* bulk-OUT HS (other-speed FS=64) */
 #define EPB_OTHER_MAX_PKT_SIZE         64
 
 #define CEP_BUF_BASE                   0

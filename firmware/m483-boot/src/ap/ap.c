@@ -1,7 +1,7 @@
 #include "ap.h"
 #include "uf2/uf2.h"
 #include "boot/boot.h"
-#include "usb_msc/usbd_msc.h"   
+#include "usb_msc/usbd_msc.h"
 
 
 static void bootUp(void);
@@ -23,7 +23,6 @@ void apMain(void)
 {
   uint32_t pre_time    = millis();
   bool     eject_armed = false;
-  bool     eject_done  = false;
   uint32_t eject_ms    = 0;
 
   while (1)
@@ -38,21 +37,25 @@ void apMain(void)
     usbUpdate();
     uf2Update();
 
-    /* 펌웨어 갱신 없이 USB 드라이브 "꺼내기" -> 부트 종료 후 앱 실행(baram/convex 참고).
-     * 플래싱 중이면 무시(uf2Update 완료 경로가 스스로 리셋). CSW가 호스트로 전송될
-     * 시간을 잠깐 준 뒤 bootJumpFirm() 직접 점프(부트키/조건 재평가 없이 앱으로). */
-    if (!eject_done && !eject_armed && mscEjectRequested() && !uf2IsBusy())
+    /* 펌웨어 갱신 없이 USB 드라이브 "꺼내기" -> 칩 리셋 후 앱 실행.
+     *
+     * 앱으로 직접 점프(bootJumpFirm)하면 HSUSBD PHY/풀업이 켜진 채 남아 macOS가
+     * 깨끗한 "제거"를 못 봐서 Finder가 멈추고 재열거도 안 된다. 그래서 baram과 달리
+     * (1) CSW 전송 대기 -> (2) USB 분리(SE0) -> (3) 잠깐 대기(호스트가 제거 처리)
+     * -> (4) NVIC_SystemReset. 리셋 후 bootUp()이 유효 펌웨어로 점프하므로
+     * "꺼내기 = 앱 실행" 동작은 유지되고, 무효면 MSC로 깨끗이 재열거된다.
+     * 플래싱 중이면 무시(uf2Update 완료 경로가 스스로 리셋). */
+    if (!eject_armed && mscEjectRequested() && !uf2IsBusy())
     {
       eject_armed = true;
       eject_ms    = millis();
-      logPrintf("Eject     : exit boot -> jump app\r\n");
+      logPrintf("Eject     : disconnect USB -> reset\r\n");
     }
     if (eject_armed && (millis() - eject_ms >= 100))
     {
-      bootJumpFirm();     /* 유효하면 리턴 안 함(앱으로 분기) */
-      logPrintf("Eject     : app invalid -> stay boot\r\n");
-      eject_armed = false;
-      eject_done  = true; /* 무효 -> 재시도하지 않음(부트 잔류) */
+      usbDisconnect();    /* D+ 풀업 드롭 -> 호스트가 제거로 인식 */
+      delay(100);         /* 호스트가 분리를 처리할 시간 */
+      resetToReset();     /* 칩 전체 리셋(리턴 안 함) -> 부트 재진입 -> 앱 점프 */
     }
   }
 }

@@ -24,6 +24,10 @@ void usbInit(void);
 void usbUpdate(void);
 bool usbIsConfigured(void);
 
+/* Force a clean bus disconnect (drop D+ pull-up). Host sees a device removal.
+ * Used on "eject" just before a chip reset so macOS releases the volume. */
+void usbDisconnect(void);
+
 #ifdef __cplusplus
 }
 #endif

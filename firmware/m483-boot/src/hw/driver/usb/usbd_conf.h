@@ -22,6 +22,10 @@ void usbdConfInit(void);
 /* SET_CONFIGURATION completed ? */
 bool usbdConfIsConfigured(void);
 
+/* Force a clean bus disconnect: mask the HSUSBD IRQ and drive SE0 (drop the D+
+ * pull-up) so the host registers a device removal. Used on eject before reset. */
+void usbdConfDisconnect(void);
+
 #ifdef __cplusplus
 }
 #endif

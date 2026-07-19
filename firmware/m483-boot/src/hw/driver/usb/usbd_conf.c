@@ -56,14 +56,24 @@ void usbdConfInit(void)
   /* Enable HSUSBD interrupt. */
   NVIC_EnableIRQ(USBD20_IRQn);
 
-  /* FULL-SPEED attach: do NOT set HISPDEN. Enable the DP pull-up so the host
-   * enumerates us as a 12 Mbps full-speed device. */
-  HSUSBD_CLR_SE0();
+  /* HIGH-SPEED attach (HSUSBD_Start sets HISPDEN then CLR_SE0). HSUSBD is a
+   * native USB 2.0 HS PHY; running it in hand-forced full-speed (HISPDEN clear)
+   * is non-standard and enumerates unreliably on some hosts (macOS). The BSP
+   * MSC samples and the m483-fw app both attach with HSUSBD_Start(). */
+  HSUSBD_Start();
 }
 
 bool usbdConfIsConfigured(void)
 {
   return (g_hsusbd_Configured != 0);
+}
+
+void usbdConfDisconnect(void)
+{
+  /* 재부착을 막기 위해 IRQ부터 차단(VBUSDET 핸들러가 HSUSBD_ENABLE_USB로 풀업을
+   * 다시 켜는 것 방지), 그다음 SE0로 D+ 풀업 드롭 -> 호스트가 제거로 인식. */
+  NVIC_DisableIRQ(USBD20_IRQn);
+  HSUSBD_SET_SE0();
 }
 
 /*--------------------------------------------------------------------------*/

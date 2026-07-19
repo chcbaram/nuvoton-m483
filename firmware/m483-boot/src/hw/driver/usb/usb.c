@@ -33,5 +33,10 @@ bool usbIsConfigured(void)
   return usbdConfIsConfigured();
 }
 
+void usbDisconnect(void)
+{
+  usbdConfDisconnect();
+}
+
 /* mscSetWriteCb() is provided by usb_msc/usbd_msc.c and re-exported through
  * usb.h for ap.c; no wrapper needed. */
