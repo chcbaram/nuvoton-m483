@@ -10,3 +10,5 @@ compile_commands.json
 CTestTestfile.cmake
 _deps
 firmware/m483-fw/build
+firmware/m483-fw/build-*/
+firmware/m483-fw/output/

@@ -5,17 +5,22 @@
       "label": "build-configure",
       "type": "shell",
       "osx":{
-        "command": "cmake -S . -B build",
+        "command": "cmake -S . -B build-${input:board} -DKEYBOARD_PATH='/keyboards/baram/${input:board}'",
       },
       "windows":{
-        "command": "cmake -S . -B build -G 'MinGW Makefiles'",
+        "command": "cmake -S . -B build-${input:board} -G 'MinGW Makefiles' -DKEYBOARD_PATH='/keyboards/baram/${input:board}'",
       },
       "problemMatcher": []
-    },    
+    },
     {
       "label": "build-build",
       "type": "shell",
-      "command": "cmake --build build -j10",
+      "osx":{
+        "command": "cmake -S . -B build-${input:board} -DKEYBOARD_PATH='/keyboards/baram/${input:board}' && cmake --build build-${input:board} -j10",
+      },
+      "windows":{
+        "command": "cmake -S . -B build-${input:board} -G 'MinGW Makefiles' -DKEYBOARD_PATH='/keyboards/baram/${input:board}'; cmake --build build-${input:board} -j10",
+      },
       "problemMatcher": [],
       "group": {
         "kind": "build",
@@ -25,16 +30,34 @@
     {
       "label": "build-clean",
       "type": "shell",
-      "command": "cmake --build build --target clean",
+      "command": "cmake --build build-${input:board} --target clean",
       "problemMatcher": [],
     },
 
     {
-      "label": "uf2-make-uf2",
+      "label": "deploy-image",
+      "detail": "전체 보드 clean 빌드 + 릴리즈 zip 생성 (output/WISH-V<날짜>R<n>.zip)",
       "type": "shell",
-      "command": "tools/uf2/uf2conv.py build/baram-qmk-8k.bin --family 0xFFFF0001 --convert --output build/baram-qmk-8k.uf2",
+      "osx":{
+        "command": "python3 tools/build_wish.py -c",
+      },
+      "windows":{
+        "command": "python tools/build_wish.py -c",
+      },
       "problemMatcher": [],
-    }    
+    }
 
+  ],
+
+  "inputs": [
+    {
+      "id": "board",
+      "type": "pickString",
+      "description": "빌드할 보드를 선택하세요",
+      "options": [
+        { "value": "45k", "label": "WISH45-8K (baram/45k)" }
+      ],
+      "default": "45k"
+    }
   ]
 }

@@ -176,14 +176,25 @@ add_custom_command(TARGET ${EXECUTABLE}
   COMMAND ${CMAKE_SIZE_UTIL}  ${EXECUTABLE} --format=berkeley 
   )  
   
-add_custom_command(TARGET ${EXECUTABLE} 
+add_custom_command(TARGET ${EXECUTABLE}
   POST_BUILD
   COMMAND ${CMAKE_OBJCOPY} ARGS -O binary ${EXECUTABLE} ${PROJECT_NAME}.bin
   COMMENT "Invoking: Make Binary"
-  )  
+  )
 
-# add_custom_command(TARGET ${EXECUTABLE} 
-#   POST_BUILD
-#   COMMAND ../tools/uf2/uf2conv.py ARGS ${PROJECT_NAME}.bin --family 0xFFFF0001 --convert --output ${PROJECT_NAME}.uf2
-#   COMMENT "Invoking: Make UF2"
-#   )    
+# 보드명(config.h) + 펌웨어 버전(hw_def.h) 추출 -> uf2 파일명 = <KBD_NAME>-<FIRM_VER>.uf2
+file(READ "${QMK_KEYBOARD_PATH}/config.h" config_in)
+string(REPLACE "\"" "" config_out ${config_in})
+string(REGEX MATCH "KBD_NAME * ([-A-Za-z0-9.]*)" _ ${config_out})
+set(KBD_NAME ${CMAKE_MATCH_1})
+
+file(READ "src/hw/hw_def.h" version_in)
+string(REPLACE "\"" "" version_out ${version_in})
+string(REGEX MATCH "_DEF_FIRMWATRE_VERSION * ([-A-Za-z0-9]*)" _ ${version_out})
+set(FIRM_VER ${CMAKE_MATCH_1})
+
+add_custom_command(TARGET ${EXECUTABLE}
+  POST_BUILD
+  COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tools/uf2/uf2conv.py ${PROJECT_NAME}.bin --family 0xFFFF0002 --convert --output ${KBD_NAME}-${FIRM_VER}.uf2
+  COMMENT "Invoking: Make UF2 -> ${KBD_NAME}-${FIRM_VER}.uf2"
+  )
