@@ -1,20 +1,28 @@
 /*
  * keys.c
  *
- *  키 매트릭스 스캐너 - EPWM1 4채널 accumulator + 순환 PDMA + COL 능동 방전(open-drain).
- *  방전/풀다운은 KEY_USE_DISCHARGE / KEY_USE_PULLDOWN 로 토글. 실측 1MHz 동작.
+ *  키 매트릭스 스캐너 - EPWM1 5채널 accumulator + 순환 PDMA + COL 능동 방전(open-drain).
+ *  방전/풀다운은 KEY_USE_DISCHARGE / KEY_USE_PULLDOWN 로 토글. 실측 800KHz 동작.
  *
  *  [보드별 파라미터화]
  *   포트는 고정 : ROW = PA (push-pull 출력), COL = PB (open-drain, PIN 읽기).
  *   ROW/COL 개수와 포트 내 핀 비트순서는 보드마다 다르며 keysInit(cfg) 로 주입한다.
  *   마스크(ROW/COL/보호)는 주입된 비트 배열로 init 시 1회 계산 -> 핫패스 비용 불변.
  *
- *  한 EPWM1 주기 = 한 행 스텝. 4채널 accumulator 를 서로 다른 포인트로 PDMA 트리거:
- *   CH0 @ zero(0%)      -> PDMA: ROW 선택 패턴을 PA->DOUT
- *   CH1 @ compare(5%)   -> PDMA: COL '0'(방전) 을 PB->DOUT
- *   CH2 @ compare(25%)  -> PDMA: COL '1'(릴리즈) 을 PB->DOUT
- *   CH3 @ compare(75%)  -> PDMA: PB->PIN 읽기 -> col_raw (settle 후 샘플)
- *  4채널 모두 self-loop scatter-gather 로 순환 -> CPU/인터럽트 0.
+ *  한 EPWM1 주기(800KHz=1.25µs) = 한 행 스텝. 5채널 accumulator 를 서로 다른
+ *  포인트로 PDMA 트리거:
+ *   CH0 @ zero(0%)     -> PDMA: 전 ROW 비활성(PA=0)
+ *   CH1 @ compare(5%)  -> PDMA: COL '0'(방전, LOW) 을 PB->DOUT   [전 ROW LOW 상태]
+ *   CH2 @ compare(55%) -> PDMA: COL '1'(릴리즈, float) 을 PB->DOUT
+ *   CH3 @ compare(60%) -> PDMA: ROW 선택 패턴(HIGH) 을 PA->DOUT  [COL float 상태]
+ *   CH4 @ compare(95%) -> PDMA: PB->PIN 읽기 -> col_raw (settle 후 샘플)
+ *  5채널 모두 self-loop scatter-gather 로 순환 -> CPU/인터럽트 0.
+ *  (방전 5~55%=625ns, 정착 60~95%=437ns. 5단계는 위상이 많아 1MHz 로는 예산이
+ *   부족해 채터 -> 800KHz 로 방전·정착 확보. 전체 스캔 = 800K/4 = 200KHz.)
+ *
+ *  [쇼트 제거] ROW HIGH(push-pull) 와 COL LOW(open-drain) 저임피던스 구동이 절대
+ *   겹치지 않게 배치: 방전(COL LOW)은 전 ROW 가 LOW 일 때만, ROW HIGH 는 COL 릴리즈
+ *   (float) 이후. 눌린 키의 ROW->COL 관통 전류가 원리적으로 0.
  *
  *  주: accumulator 는 IFACNT=0 이어야 매 주기(1×). WS2812=EPWM0/PDMA ch0 와 분리.
  */
@@ -33,16 +41,23 @@
 
 #define KEY_EPWM            EPWM1
 
-/* PDMA 채널 (WS2812=ch0 사용중이라 ch1~4) */
-#define KEY_PDMA_CH_ROW     1                   /* EPWM1 CH0 @zero  : ROW 쓰기 */
-#define KEY_PDMA_CH_DIS     2                   /* EPWM1 CH1 @5%    : COL 방전 */
-#define KEY_PDMA_CH_REL     3                   /* EPWM1 CH2 @25%   : COL 릴리즈 */
-#define KEY_PDMA_CH_READ    4                   /* EPWM1 CH3 @75%   : COL 읽기 */
+/* PDMA 채널 (WS2812=ch0 사용중이라 ch1~5).
+ * 5단계 시퀀스로 ROW-COL 관통 전류(쇼트) 제거:
+ *  DESEL(0%)->DIS(5%)->REL(55%)->ROWSEL(60%)->READ(95%).
+ *  COL 을 LOW 로 구동하는 방전(5~55%)은 전 ROW 가 비활성일 때만, ROW HIGH 는
+ *  COL 릴리즈(float) 이후라 두 저임피던스 구동이 절대 겹치지 않는다. */
+#define KEY_PDMA_CH_DESEL   1                   /* EPWM1 CH0 @0%    : ROW 전체 비활성(PA=0) */
+#define KEY_PDMA_CH_DIS     2                   /* EPWM1 CH1 @5%    : COL 방전(LOW) */
+#define KEY_PDMA_CH_REL     3                   /* EPWM1 CH2 @55%   : COL 릴리즈(float) */
+#define KEY_PDMA_CH_ROW     4                   /* EPWM1 CH3 @60%   : ROW 선택(HIGH) */
+#define KEY_PDMA_CH_READ    5                   /* EPWM1 CH4 @95%   : COL 읽기 */
 
-#define KEY_SCAN_FREQ_HZ    1000000
-#define KEY_DISCHARGE_DUTY  5                   /* COL 방전 시점 % */
-#define KEY_RELEASE_DUTY    55                  /* COL 릴리즈 시점 % */
-#define KEY_SAMPLE_DUTY     95                  /* COL 샘플 시점 % */
+/* 800KHz(1.25µs) : 5단계에 방전(625ns)+정착(437ns) 예산 확보. 1MHz 는 채터. */
+#define KEY_SCAN_FREQ_HZ    800000
+#define KEY_DISCHARGE_DUTY  5                   /* COL 방전 시작 % */
+#define KEY_RELEASE_DUTY    55                  /* COL 릴리즈(float) % — 방전 5~55%(625ns) */
+#define KEY_ROWSEL_DUTY     60                  /* ROW 선택(HIGH) % — 릴리즈 5%(62ns) 갭 */
+#define KEY_SAMPLE_DUTY     95                  /* COL 샘플 % — 정착 60~95%(437ns) */
 #define KEY_ACC_CNT         0                   /* 0 = 매 주기(1×). 1 은 2× */
 #define KEY_USE_DISCHARGE   1                   /* 1=능동방전 */
 #define KEY_USE_PULLDOWN    1                   /* 1=COL 내부 풀다운 병행(보험) */
@@ -79,9 +94,11 @@ static uint16_t matrix[KEY_ROW_MAX];
 
 static volatile uint32_t row_pat[KEY_ROW_MAX];             /* 행 선택 패턴 -> PA->DOUT */
 static volatile uint32_t col_raw[KEY_ROW_MAX];             /* PB->PIN 캡처 (행별) */
+static volatile uint32_t row_desel_val = 0;                /* 전 ROW 비활성(PA=0) */
 static volatile uint32_t col_dis_val = 0;                  /* 방전값 */
 static volatile uint32_t col_rel_val = 0;                  /* 릴리즈값 (col 비트 1) */
 
+static __attribute__((aligned(4))) dma_desc_t desc_desel;
 static __attribute__((aligned(4))) dma_desc_t desc_row;
 static __attribute__((aligned(4))) dma_desc_t desc_dis;
 static __attribute__((aligned(4))) dma_desc_t desc_rel;
@@ -175,41 +192,49 @@ bool keysInit(const keys_cfg_t *cfg)
 #endif
   GPIO_ENABLE_DOUT_MASK(KEY_COL_PORT, key_col_prot);
 
-  /* ---- EPWM1 : 4채널 동일 주기 ---- */
-  EPWM_ConfigOutputChannel(KEY_EPWM, 0, KEY_SCAN_FREQ_HZ, 50);
-  EPWM_ConfigOutputChannel(KEY_EPWM, 1, KEY_SCAN_FREQ_HZ, KEY_DISCHARGE_DUTY);
-  EPWM_ConfigOutputChannel(KEY_EPWM, 2, KEY_SCAN_FREQ_HZ, KEY_RELEASE_DUTY);
-  EPWM_ConfigOutputChannel(KEY_EPWM, 3, KEY_SCAN_FREQ_HZ, KEY_SAMPLE_DUTY);
+  /* ---- EPWM1 : 5채널 동일 주기 (DESEL/DIS/REL/ROWSEL/READ) ---- */
+  EPWM_ConfigOutputChannel(KEY_EPWM, 0, KEY_SCAN_FREQ_HZ, 50);                  /* @0% (zero) : DESEL */
+  EPWM_ConfigOutputChannel(KEY_EPWM, 1, KEY_SCAN_FREQ_HZ, KEY_DISCHARGE_DUTY);  /* @5%  : DIS  */
+  EPWM_ConfigOutputChannel(KEY_EPWM, 2, KEY_SCAN_FREQ_HZ, KEY_RELEASE_DUTY);    /* @55% : REL  */
+  EPWM_ConfigOutputChannel(KEY_EPWM, 3, KEY_SCAN_FREQ_HZ, KEY_ROWSEL_DUTY);     /* @60% : ROWSEL */
+  EPWM_ConfigOutputChannel(KEY_EPWM, 4, KEY_SCAN_FREQ_HZ, KEY_SAMPLE_DUTY);     /* @95% : READ */
 
   EPWM_EnableAcc(KEY_EPWM, 0, KEY_ACC_CNT, EPWM_IFA_ZERO_POINT);
   EPWM_EnableAcc(KEY_EPWM, 1, KEY_ACC_CNT, EPWM_IFA_COMPARE_UP_COUNT_POINT);
   EPWM_EnableAcc(KEY_EPWM, 2, KEY_ACC_CNT, EPWM_IFA_COMPARE_UP_COUNT_POINT);
   EPWM_EnableAcc(KEY_EPWM, 3, KEY_ACC_CNT, EPWM_IFA_COMPARE_UP_COUNT_POINT);
+  EPWM_EnableAcc(KEY_EPWM, 4, KEY_ACC_CNT, EPWM_IFA_COMPARE_UP_COUNT_POINT);
   EPWM_EnableAccPDMA(KEY_EPWM, 0);
   EPWM_EnableAccPDMA(KEY_EPWM, 1);
   EPWM_EnableAccPDMA(KEY_EPWM, 2);
   EPWM_EnableAccPDMA(KEY_EPWM, 3);
+  EPWM_EnableAccPDMA(KEY_EPWM, 4);
 
-  /* ---- PDMA : 4채널 self-loop scatter-gather ---- */
-  PDMA_Open(PDMA, (1UL << KEY_PDMA_CH_ROW) | (1UL << KEY_PDMA_CH_DIS) |
-                  (1UL << KEY_PDMA_CH_REL) | (1UL << KEY_PDMA_CH_READ));
+  /* ---- PDMA : 5채널 self-loop scatter-gather ---- */
+  PDMA_Open(PDMA, (1UL << KEY_PDMA_CH_DESEL) | (1UL << KEY_PDMA_CH_DIS) |
+                  (1UL << KEY_PDMA_CH_REL)   | (1UL << KEY_PDMA_CH_ROW) |
+                  (1UL << KEY_PDMA_CH_READ));
 
-  keySetDesc(&desc_row,  PDMA_SAR_INC | PDMA_DAR_FIX, key_row_cnt,
-             (uint32_t)row_pat,            (uint32_t)&KEY_ROW_PORT->DOUT);
+  keySetDesc(&desc_desel, PDMA_SAR_FIX | PDMA_DAR_FIX, 1,
+             (uint32_t)&row_desel_val,     (uint32_t)&KEY_ROW_PORT->DOUT);
   keySetDesc(&desc_dis,  PDMA_SAR_FIX | PDMA_DAR_FIX, 1,
              (uint32_t)&col_dis_val,       (uint32_t)&KEY_COL_PORT->DOUT);
   keySetDesc(&desc_rel,  PDMA_SAR_FIX | PDMA_DAR_FIX, 1,
              (uint32_t)&col_rel_val,       (uint32_t)&KEY_COL_PORT->DOUT);
+  keySetDesc(&desc_row,  PDMA_SAR_INC | PDMA_DAR_FIX, key_row_cnt,
+             (uint32_t)row_pat,            (uint32_t)&KEY_ROW_PORT->DOUT);
   keySetDesc(&desc_read, PDMA_SAR_FIX | PDMA_DAR_INC, key_row_cnt,
              (uint32_t)&KEY_COL_PORT->PIN, (uint32_t)col_raw);
 
-  PDMA_SetTransferMode(PDMA, KEY_PDMA_CH_ROW,  PDMA_EPWM1_CH0_TX, TRUE, (uint32_t)&desc_row);
-  PDMA_SetTransferMode(PDMA, KEY_PDMA_CH_DIS,  PDMA_EPWM1_CH1_TX, TRUE, (uint32_t)&desc_dis);
-  PDMA_SetTransferMode(PDMA, KEY_PDMA_CH_REL,  PDMA_EPWM1_CH2_TX, TRUE, (uint32_t)&desc_rel);
-  PDMA_SetTransferMode(PDMA, KEY_PDMA_CH_READ, PDMA_EPWM1_CH3_TX, TRUE, (uint32_t)&desc_read);
+  PDMA_SetTransferMode(PDMA, KEY_PDMA_CH_DESEL, PDMA_EPWM1_CH0_TX, TRUE, (uint32_t)&desc_desel);
+  PDMA_SetTransferMode(PDMA, KEY_PDMA_CH_DIS,   PDMA_EPWM1_CH1_TX, TRUE, (uint32_t)&desc_dis);
+  PDMA_SetTransferMode(PDMA, KEY_PDMA_CH_REL,   PDMA_EPWM1_CH2_TX, TRUE, (uint32_t)&desc_rel);
+  PDMA_SetTransferMode(PDMA, KEY_PDMA_CH_ROW,   PDMA_EPWM1_CH3_TX, TRUE, (uint32_t)&desc_row);
+  PDMA_SetTransferMode(PDMA, KEY_PDMA_CH_READ,  PDMA_EPWM1_CH4_TX, TRUE, (uint32_t)&desc_read);
 
-  /* ---- 스캔 시작 (4채널 동시 -> 같은 위상) ---- */
-  EPWM_Start(KEY_EPWM, EPWM_CH_0_MASK | EPWM_CH_1_MASK | EPWM_CH_2_MASK | EPWM_CH_3_MASK);
+  /* ---- 스캔 시작 (5채널 동시 -> 같은 위상) ---- */
+  EPWM_Start(KEY_EPWM, EPWM_CH_0_MASK | EPWM_CH_1_MASK | EPWM_CH_2_MASK |
+                       EPWM_CH_3_MASK | EPWM_CH_4_MASK);
 
   is_init = true;
 
