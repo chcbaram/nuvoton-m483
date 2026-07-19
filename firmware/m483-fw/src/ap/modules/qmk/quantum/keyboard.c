@@ -32,7 +32,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "sendchar.h"
 #include "eeconfig.h"
 #include "action_layer.h"
-#include "prof.h"
 #ifdef BOOTMAGIC_ENABLE
 #    include "bootmagic.h"
 #endif
@@ -570,9 +569,7 @@ static bool matrix_task(void) {
                 const bool key_pressed = current_row & col_mask;
 
                 if (process_keypress) {
-                    uint32_t prof_ac0 = profNow();
                     action_exec(MAKE_KEYEVENT(row, col, key_pressed));
-                    profAdd(PROF_ACTION, "action", profNow() - prof_ac0);
                 }
 
                 switch_events(row, col, key_pressed);

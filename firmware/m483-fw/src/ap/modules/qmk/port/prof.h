@@ -18,7 +18,6 @@ enum
 {
   PROF_KBD_TASK = 0,   /* keyboard_task 전체 (변화 스캔만) */
   PROF_MATRIX,         /* matrix_scan */
-  PROF_ACTION,         /* action_exec (process_record 포함) */
   PROF_HOOK,           /* process_record_user (SOCD/kkuk) */
   PROF_SEND,           /* USB send + enqueue */
   PROF_MAX
