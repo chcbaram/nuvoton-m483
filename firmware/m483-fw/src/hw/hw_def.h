@@ -10,6 +10,11 @@
 #define _DEF_BOARD_NAME           "WISH-QMK-8K"
 
 
+/* Retained boot-flag block shared with m483-boot (BOOT_APP builds). */
+#define BOOT_FLAG_ADDR            0x20027FE0UL
+#define BOOT_REQUEST_MAGIC        0x424F4F54UL              /* "BOOT" */
+
+
 
 #define _USE_HW_LED
 #define      HW_LED_MAX_CH          1

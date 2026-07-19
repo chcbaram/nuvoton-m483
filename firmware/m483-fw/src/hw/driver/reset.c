@@ -10,7 +10,11 @@ static void cliReset(cli_args_t *args);
 
 static bool     is_init    = false;
 static uint32_t reset_bits = 0;
-static uint32_t boot_mode  = 0;   /* 주: RTC 스페어 레지스터 미사용(RAM) -> 리셋 후 비영속 */
+static uint32_t boot_mode  = 0;
+
+#ifdef BOOT_APP
+static volatile uint32_t *p_boot_flag = (volatile uint32_t *)BOOT_FLAG_ADDR;
+#endif
 
 
 static const char *reset_bit_str[] =
@@ -43,8 +47,14 @@ bool resetInit(void)
   if (rst_sts & SYS_RSTSTS_SYSRF_Msk)
     reset_bits |= (1 << RESET_BIT_SOFT);
 
-  /* write-1-clear : 확인한 리셋 플래그 클리어 */
   SYS->RSTSTS = rst_sts;
+
+#ifdef BOOT_APP
+  if (p_boot_flag[0] == BOOT_REQUEST_MAGIC)
+    boot_mode = p_boot_flag[1];
+  p_boot_flag[0] = 0;
+  p_boot_flag[1] = 0;
+#endif
 
   is_init = true;
 
@@ -89,6 +99,10 @@ void resetSetBits(uint32_t data)
 void resetSetBootMode(uint32_t data)
 {
   boot_mode = data;
+#ifdef BOOT_APP
+  p_boot_flag[0] = BOOT_REQUEST_MAGIC;
+  p_boot_flag[1] = data;
+#endif
 }
 
 uint32_t resetGetBootMode(void)

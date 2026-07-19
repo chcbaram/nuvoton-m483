@@ -127,8 +127,22 @@ target_include_directories(${EXECUTABLE} PRIVATE
   ${QMK_INC_DIR}
 )
 
+# Build the firmware as an application that runs under the m483-boot UF2
+# bootloader (linked at 0xC000, VTOR relocated, boot-flag in retained SRAM,
+# UF2 target base 0xC000). Default ON -> standalone image at 0xC000.
+option(BOOT_APP "Link as m483-boot application at 0xC000" ON)
+if(BOOT_APP)
+  set(APP_LDSCRIPT gcc_arm_boot.ld)
+  set(UF2_BASE_ARG --base 0x0000C000)
+  message(STATUS "BOOT_APP=ON : linking application at 0xC000 (under m483-boot)")
+else()
+  set(APP_LDSCRIPT gcc_arm.ld)
+  set(UF2_BASE_ARG )
+endif()
+
 target_compile_definitions(${EXECUTABLE} PRIVATE
   -D__STARTUP_CLEAR_BSS
+  $<$<BOOL:${BOOT_APP}>:BOOT_APP>
   )
 
 target_compile_options(${EXECUTABLE} PRIVATE
@@ -150,7 +164,7 @@ target_compile_options(${EXECUTABLE} PRIVATE
   )
 
 target_link_options(${EXECUTABLE} PRIVATE
-  -T../src/bsp/ldscript/gcc_arm.ld
+  -T../src/bsp/ldscript/${APP_LDSCRIPT}
 
   -mcpu=cortex-m4
   -mthumb
@@ -195,6 +209,6 @@ set(FIRM_VER ${CMAKE_MATCH_1})
 
 add_custom_command(TARGET ${EXECUTABLE}
   POST_BUILD
-  COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tools/uf2/uf2conv.py ${PROJECT_NAME}.bin --family 0xFFFF0002 --convert --output ${KBD_NAME}-${FIRM_VER}.uf2
+  COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tools/uf2/uf2conv.py ${PROJECT_NAME}.bin --family 0xFFFF0002 ${UF2_BASE_ARG} --convert --output ${KBD_NAME}-${FIRM_VER}.uf2
   COMMENT "Invoking: Make UF2 -> ${KBD_NAME}-${FIRM_VER}.uf2"
   )

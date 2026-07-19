@@ -92,6 +92,12 @@ void SystemInit (void)
                    (3UL << 11*2)  );               /* set CP11 Full Access */
 #endif
 
+#ifdef BOOT_APP
+    /* Running under the m483-boot UF2 bootloader: relocate the vector table to
+     * the application base (must match gcc_arm_boot.ld VECTOR origin). */
+    SCB->VTOR = 0x0000C000UL;
+#endif
+
     /* Set access cycle for CPU @ 192MHz */
     FMC->CYCCTL = (FMC->CYCCTL & ~FMC_CYCCTL_CYCLE_Msk) | (8 << FMC_CYCCTL_CYCLE_Pos);
     /* Configure power down bias, must set 1 before entering power down mode.

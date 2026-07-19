@@ -25,7 +25,7 @@ void apMain(void)
     if (millis() - pre_time >= 500)
     {
       pre_time = millis();
-      ledToggle(_DEF_LED1);
+      // ledToggle(_DEF_LED1);
     }
 
     qmkUpdate();   /* 매 회 matrix_scan -> action -> USB (저지연, sleep 없음) */
